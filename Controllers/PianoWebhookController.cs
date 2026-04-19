@@ -9,9 +9,9 @@ namespace piano_mailchimp_webhook.Controllers;
 public sealed class PianoWebhookController(IPianoWebhookService webhookService) : ControllerBase
 {
     [HttpPost]
-    public async Task<IActionResult> Receive([FromBody] PianoWebhookPayload payload, CancellationToken cancellationToken)
+    public async Task<IActionResult> Receive([FromBody] PianoWebhookEvent webhookEvent, CancellationToken cancellationToken)
     {
-        await webhookService.ProcessAsync(payload, cancellationToken);
+        await webhookService.ProcessAsync(webhookEvent, cancellationToken);
         return Accepted();
     }
 }
