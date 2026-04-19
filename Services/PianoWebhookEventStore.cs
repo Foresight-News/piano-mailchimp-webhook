@@ -99,11 +99,14 @@ public sealed class PianoWebhookEventStore(IHostEnvironment hostEnvironment)
                 throw new FileNotFoundException($"Webhook event record {recordId} was not found.", path);
             }
 
-            await using var inputStream = File.OpenRead(path);
-            var existing = await JsonSerializer.DeserializeAsync<PianoWebhookEventRecord>(
-                inputStream,
-                JsonOptions,
-                cancellationToken);
+            PianoWebhookEventRecord? existing;
+            await using (var inputStream = File.OpenRead(path))
+            {
+                existing = await JsonSerializer.DeserializeAsync<PianoWebhookEventRecord>(
+                    inputStream,
+                    JsonOptions,
+                    cancellationToken);
+            }
 
             if (existing is null)
             {
