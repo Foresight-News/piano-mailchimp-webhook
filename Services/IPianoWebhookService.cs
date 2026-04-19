@@ -4,5 +4,5 @@ namespace piano_mailchimp_webhook.Services;
 
 public interface IPianoWebhookService
 {
-    Task ProcessAsync(PianoWebhookPayload payload, CancellationToken cancellationToken);
+    Task ProcessAsync(PianoWebhookEvent webhookEvent, CancellationToken cancellationToken);
 }

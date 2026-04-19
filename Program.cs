@@ -15,6 +15,7 @@ builder.Services.Configure<PianoWebhookOptions>(
 builder.Services.AddHttpClient<IMailchimpAudienceService, MailchimpAudienceService>();
 builder.Services.AddHttpClient<IPianoApiClient, PianoApiClient>();
 builder.Services.AddSingleton<INewsletterPreferenceMapper, NewsletterPreferenceMapper>();
+builder.Services.AddScoped<IPianoWebhookProcessor, PianoWebhookProcessor>();
 builder.Services.AddScoped<IPianoWebhookService, PianoWebhookService>();
 
 var app = builder.Build();
