@@ -40,6 +40,7 @@ builder.Services.AddHttpClient<IPianoApiClient, PianoApiClient>((serviceProvider
         httpClient.BaseAddress = new Uri($"{options.BaseUrl.TrimEnd('/')}/");
     }
 });
+builder.Services.AddSingleton<PianoWebhookEventStore>();
 builder.Services.AddSingleton<INewsletterPreferenceMapper, NewsletterPreferenceMapper>();
 builder.Services.AddScoped<IPianoWebhookProcessor, PianoWebhookProcessor>();
 builder.Services.AddScoped<IPianoWebhookService, PianoWebhookService>();
