@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using piano_mailchimp_webhook.Config;
 using piano_mailchimp_webhook.Models;
@@ -74,10 +75,24 @@ public sealed class NewsletterPreferenceMapper(
         return value switch
         {
             bool boolValue => boolValue,
+            JsonElement jsonElement => ConvertJsonElementToBool(jsonElement),
             string stringValue => ParseStringValue(stringValue),
             int intValue => intValue != 0,
             long longValue => longValue != 0,
             decimal decimalValue => decimalValue != 0,
+            _ => false
+        };
+    }
+
+    private static bool ConvertJsonElementToBool(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => ParseStringValue(value.GetString() ?? string.Empty),
+            JsonValueKind.Number when value.TryGetInt64(out var longValue) => longValue != 0,
+            JsonValueKind.Number when value.TryGetDecimal(out var decimalValue) => decimalValue != 0,
             _ => false
         };
     }
