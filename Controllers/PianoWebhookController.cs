@@ -9,7 +9,7 @@ namespace piano_mailchimp_webhook.Controllers;
 [ApiController]
 [Route("webhooks/piano")]
 public sealed class PianoWebhookController(
-    PianoWebhookEventStore eventStore,
+    IPianoWebhookEventStore eventStore,
     IPianoWebhookProcessor webhookProcessor,
     ILogger<PianoWebhookController> logger) : ControllerBase
 {
@@ -65,7 +65,7 @@ public sealed class PianoWebhookController(
             webhookEvent.Event ?? "unknown",
             webhookEvent.Uid ?? "unknown");
 
-        if (string.Equals(storedEvent.Status, "Duplicate", StringComparison.Ordinal))
+        if (string.Equals(storedEvent.Status, PianoWebhookEventStatuses.Duplicate, StringComparison.Ordinal))
         {
             logger.LogInformation(
                 "Skipping duplicate Piano webhook event {EventName} for uid {Uid}.",

@@ -58,7 +58,7 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.False(root.GetProperty("interests").GetProperty("interest-sports").GetBoolean());
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
-        Assert.Equal("Processed", storedRecord.Status);
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
         Assert.Equal(eventName, storedRecord.Event);
         Assert.Equal("user-123", storedRecord.Uid);
     }
@@ -89,7 +89,7 @@ public sealed class PianoWebhookFlowIntegrationTests
                          StringComparison.Ordinal));
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
-        Assert.Equal("Processed", storedRecord.Status);
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.True(interests.GetProperty("interest-sports").GetBoolean());
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
-        Assert.Equal("Processed", storedRecord.Status);
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class PianoWebhookFlowIntegrationTests
                      entry.Message.Contains("has no email address", StringComparison.Ordinal));
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
-        Assert.Equal("Processed", storedRecord.Status);
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public sealed class PianoWebhookFlowIntegrationTests
                          StringComparison.Ordinal));
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
-        Assert.Equal("Failed", storedRecord.Status);
+        Assert.Equal(PianoWebhookEventStatuses.Failed, storedRecord.Status);
         Assert.Contains("status code 400", storedRecord.ErrorMessage, StringComparison.Ordinal);
     }
 
