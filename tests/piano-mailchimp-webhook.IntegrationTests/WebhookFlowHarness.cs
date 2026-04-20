@@ -4,8 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using piano_mailchimp_webhook.Config;
@@ -18,23 +16,16 @@ namespace piano_mailchimp_webhook.IntegrationTests;
 internal sealed class WebhookFlowHarness : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly string _contentRoot;
     private readonly TestLogSink _logSink = new();
     private readonly ILoggerFactory _loggerFactory;
     private readonly PianoWebhookController _controller;
+    private readonly InMemoryPianoWebhookEventStore _eventStore;
 
     public WebhookFlowHarness(
         PianoUserProfile? pianoUser,
         HttpStatusCode mailchimpStatusCode = HttpStatusCode.OK,
         string mailchimpResponseBody = "{}")
     {
-        _contentRoot = Path.Combine(
-            Path.GetTempPath(),
-            "piano-mailchimp-webhook-tests",
-            Guid.NewGuid().ToString("n"));
-
-        Directory.CreateDirectory(_contentRoot);
-
         _loggerFactory = LoggerFactory.Create(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Trace);
@@ -108,9 +99,9 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
             newsletterPreferenceMapper,
             _loggerFactory.CreateLogger<PianoWebhookProcessor>());
 
-        var eventStore = new PianoWebhookEventStore(new TestHostEnvironment(_contentRoot));
+        _eventStore = new InMemoryPianoWebhookEventStore();
         _controller = new PianoWebhookController(
-            eventStore,
+            _eventStore,
             processor,
             _loggerFactory.CreateLogger<PianoWebhookController>());
     }
@@ -144,39 +135,12 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
     public async Task<IReadOnlyList<PianoWebhookEventRecord>> ReadStoredRecordsAsync(
         CancellationToken cancellationToken = default)
     {
-        var storageDirectory = Path.Combine(_contentRoot, "App_Data", "PianoWebhookEvents");
-        if (!Directory.Exists(storageDirectory))
-        {
-            return [];
-        }
-
-        var records = new List<PianoWebhookEventRecord>();
-
-        foreach (var path in Directory.EnumerateFiles(storageDirectory, "*.json", SearchOption.TopDirectoryOnly))
-        {
-            await using var inputStream = File.OpenRead(path);
-            var record = await JsonSerializer.DeserializeAsync<PianoWebhookEventRecord>(
-                inputStream,
-                JsonOptions,
-                cancellationToken);
-
-            if (record is not null)
-            {
-                records.Add(record);
-            }
-        }
-
-        return records.OrderBy(record => record.ReceivedAt).ToArray();
+        return await _eventStore.ReadAllAsync(cancellationToken);
     }
 
     public ValueTask DisposeAsync()
     {
         _loggerFactory.Dispose();
-
-        if (Directory.Exists(_contentRoot))
-        {
-            Directory.Delete(_contentRoot, recursive: true);
-        }
 
         return ValueTask.CompletedTask;
     }
@@ -263,12 +227,4 @@ internal sealed class TestLogSink : ILoggerProvider
         {
         }
     }
-}
-
-internal sealed class TestHostEnvironment(string contentRootPath) : IHostEnvironment
-{
-    public string EnvironmentName { get; set; } = Environments.Development;
-    public string ApplicationName { get; set; } = "piano-mailchimp-webhook.IntegrationTests";
-    public string ContentRootPath { get; set; } = contentRootPath;
-    public IFileProvider ContentRootFileProvider { get; set; } = new PhysicalFileProvider(contentRootPath);
 }
