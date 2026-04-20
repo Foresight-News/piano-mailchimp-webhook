@@ -7,14 +7,14 @@ using piano_mailchimp_webhook.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.Configure<EventStoreOptions>(
+    builder.Configuration.GetSection(EventStoreOptions.SectionName));
 builder.Services.Configure<MailchimpOptions>(
     builder.Configuration.GetSection(MailchimpOptions.SectionName));
 builder.Services.Configure<NewsletterMappingOptions>(
     builder.Configuration.GetSection(NewsletterMappingOptions.SectionName));
 builder.Services.Configure<PianoOptions>(
     builder.Configuration.GetSection(PianoOptions.SectionName));
-builder.Services.Configure<PianoWebhookOptions>(
-    builder.Configuration.GetSection(PianoWebhookOptions.SectionName));
 builder.Services.AddHttpClient<IMailchimpAudienceService, MailchimpAudienceService>((serviceProvider, httpClient) =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<MailchimpOptions>>().Value;
@@ -40,7 +40,7 @@ builder.Services.AddHttpClient<IPianoApiClient, PianoApiClient>((serviceProvider
         httpClient.BaseAddress = new Uri($"{options.BaseUrl.TrimEnd('/')}/");
     }
 });
-builder.Services.AddSingleton<PianoWebhookEventStore>();
+builder.Services.AddSingleton<IPianoWebhookEventStore, PianoWebhookEventStore>();
 builder.Services.AddSingleton<INewsletterPreferenceMapper, NewsletterPreferenceMapper>();
 builder.Services.AddScoped<IPianoWebhookProcessor, PianoWebhookProcessor>();
 builder.Services.AddScoped<IPianoWebhookService, PianoWebhookService>();
