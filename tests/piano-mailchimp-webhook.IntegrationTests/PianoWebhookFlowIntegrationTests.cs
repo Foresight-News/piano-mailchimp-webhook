@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -60,6 +61,45 @@ public sealed class PianoWebhookFlowIntegrationTests
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
         Assert.Equal(eventName, storedRecord.Event);
+        Assert.Equal("user-123", storedRecord.Uid);
+    }
+
+    [Fact]
+    public async Task FormUrlEncodedWebhookPayloadIsAccepted()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["daily_news"] = true,
+                    ["sports_news"] = false
+                }
+            });
+
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["event"] = "user_updated",
+            ["uid"] = "user-123",
+            ["aid"] = "aid-123",
+            ["timestamp"] = DateTimeOffset.UtcNow.ToString("O")
+        });
+
+        var result = await harness.SendRawWebhookAsync(
+            await content.ReadAsStringAsync(),
+            "application/x-www-form-urlencoded");
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Single(harness.PianoRequests);
+        Assert.Single(harness.MailchimpRequests);
+
+        var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+        Assert.Equal("user_updated", storedRecord.Event);
         Assert.Equal("user-123", storedRecord.Uid);
     }
 

@@ -117,10 +117,19 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var payload = JsonSerializer.Serialize(webhookEvent, JsonOptions);
+
+        return await SendRawWebhookAsync(payload, "application/json", cancellationToken);
+    }
+
+    public async Task<IActionResult> SendRawWebhookAsync(
+        string payload,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
         var payloadBytes = Encoding.UTF8.GetBytes(payload);
 
         var httpContext = new DefaultHttpContext();
-        httpContext.Request.ContentType = "application/json";
+        httpContext.Request.ContentType = contentType;
         httpContext.Request.ContentLength = payloadBytes.Length;
         httpContext.Request.Body = new MemoryStream(payloadBytes);
 
