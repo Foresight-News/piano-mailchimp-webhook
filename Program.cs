@@ -5,6 +5,7 @@ using piano_mailchimp_webhook.Config;
 using piano_mailchimp_webhook.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddProductionSecretsManager();
 
 builder.Services.AddControllers();
 builder.Services.Configure<EventStoreOptions>(
