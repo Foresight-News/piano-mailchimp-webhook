@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using piano_mailchimp_webhook.Config;
 using piano_mailchimp_webhook.Models;
 using piano_mailchimp_webhook.Services;
 using Xunit;
@@ -62,6 +63,87 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
         Assert.Equal(eventName, storedRecord.Event);
         Assert.Equal("user-123", storedRecord.Uid);
+    }
+
+    [Fact]
+    public async Task SamplePianoPayloadRefreshesManagedCustomField()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "PNIP9h8uNt6ldu6",
+                Email = "john.tangen@foresightnews.com",
+                FirstName = "John",
+                LastName = "Tangen",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["FN03"] = true
+                }
+            },
+            fieldMappings:
+            [
+                new NewsletterFieldMapping
+                {
+                    PianoFieldName = "FN03",
+                    MailchimpInterestId = "interest-fn03"
+                }
+            ]);
+
+        var samplePayload = await File.ReadAllTextAsync(GetRepositoryFilePath("webhook-payload-sample.json"));
+
+        var result = await harness.SendRawWebhookAsync(samplePayload, "application/json");
+
+        Assert.IsType<OkObjectResult>(result);
+
+        var pianoRequest = Assert.Single(harness.PianoRequests);
+        Assert.Contains("uid=PNIP9h8uNt6ldu6", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
+
+        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
+        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        var root = requestBody.RootElement;
+
+        Assert.Equal("john.tangen@foresightnews.com", root.GetProperty("email_address").GetString());
+        Assert.True(root.GetProperty("interests").GetProperty("interest-fn03").GetBoolean());
+
+        var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+        Assert.Equal("piano_id_user_custom_fields_updated", storedRecord.Event);
+        Assert.Equal("PNIP9h8uNt6ldu6", storedRecord.Uid);
+    }
+
+    [Fact]
+    public async Task EnvelopedPianoUserResponseIsUsedForMailchimpSync()
+    {
+        var pianoResponseBody = """
+            {
+              "user": {
+                "uid": "user-123",
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "custom_fields": {
+                  "daily_news": true
+                }
+              }
+            }
+            """;
+
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile { Uid = "user-123" },
+            pianoResponseBody: pianoResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_updated"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Single(harness.PianoRequests);
+
+        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
+        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        var root = requestBody.RootElement;
+
+        Assert.Equal("ada@example.com", root.GetProperty("email_address").GetString());
+        Assert.Equal("Ada", root.GetProperty("merge_fields").GetProperty("FNAME").GetString());
+        Assert.True(root.GetProperty("interests").GetProperty("interest-daily").GetBoolean());
     }
 
     [Fact]
@@ -251,5 +333,17 @@ public sealed class PianoWebhookFlowIntegrationTests
             Timestamp = DateTimeOffset.UtcNow.ToString("O"),
             UpdatedCustomFields = updatedCustomFields
         };
+    }
+
+    private static string GetRepositoryFilePath(string fileName)
+    {
+        return Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            fileName));
     }
 }

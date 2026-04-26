@@ -23,6 +23,8 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
 
     public WebhookFlowHarness(
         PianoUserProfile? pianoUser,
+        IReadOnlyList<NewsletterFieldMapping>? fieldMappings = null,
+        string? pianoResponseBody = null,
         HttpStatusCode mailchimpStatusCode = HttpStatusCode.OK,
         string mailchimpResponseBody = "{}")
     {
@@ -39,7 +41,7 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             }
 
-            var responseBody = JsonSerializer.Serialize(pianoUser, JsonOptions);
+            var responseBody = pianoResponseBody ?? JsonSerializer.Serialize(pianoUser, JsonOptions);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
@@ -78,7 +80,7 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         var newsletterPreferenceMapper = new NewsletterPreferenceMapper(
             Options.Create(new NewsletterMappingOptions
             {
-                FieldMappings =
+                FieldMappings = fieldMappings?.ToList() ??
                 [
                     new NewsletterFieldMapping
                     {

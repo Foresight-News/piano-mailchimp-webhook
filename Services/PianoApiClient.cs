@@ -109,20 +109,14 @@ public sealed class PianoApiClient(
 
     private static PianoUserProfile? DeserializeUserProfile(string responseBody)
     {
-        var directProfile = JsonSerializer.Deserialize<PianoUserProfile>(responseBody, JsonOptions);
-
-        if (directProfile is not null)
+        using var document = JsonDocument.Parse(responseBody);
+        if (document.RootElement.ValueKind == JsonValueKind.Object &&
+            document.RootElement.TryGetProperty("user", out var userElement) &&
+            userElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
-            return directProfile;
+            return userElement.Deserialize<PianoUserProfile>(JsonOptions);
         }
 
-        var envelope = JsonSerializer.Deserialize<PianoUserResponseEnvelope>(responseBody, JsonOptions);
-        return envelope?.User;
-    }
-
-    private sealed class PianoUserResponseEnvelope
-    {
-        [JsonPropertyName("user")]
-        public PianoUserProfile? User { get; init; }
+        return document.RootElement.Deserialize<PianoUserProfile>(JsonOptions);
     }
 }
