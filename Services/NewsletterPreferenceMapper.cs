@@ -15,30 +15,12 @@ public sealed class NewsletterPreferenceMapper(
     {
         ArgumentNullException.ThrowIfNull(user);
 
-        return BuildInterestMap(user, _options.FieldMappings
-            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.PianoFieldName))
-            .Select(mapping => mapping.PianoFieldName)
-            .ToArray());
-    }
-
-    public Dictionary<string, bool> BuildInterestMap(
-        PianoUserProfile user,
-        IReadOnlyList<string> pianoFieldNames)
-    {
-        ArgumentNullException.ThrowIfNull(user);
-        ArgumentNullException.ThrowIfNull(pianoFieldNames);
-
-        var requestedFields = pianoFieldNames
-            .Where(fieldName => !string.IsNullOrWhiteSpace(fieldName))
-            .Select(fieldName => fieldName.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var interestMap = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var mapping in _options.FieldMappings)
         {
             if (string.IsNullOrWhiteSpace(mapping.PianoFieldName) ||
-                string.IsNullOrWhiteSpace(mapping.MailchimpInterestId) ||
-                !requestedFields.Contains(mapping.PianoFieldName.Trim()))
+                string.IsNullOrWhiteSpace(mapping.MailchimpInterestId))
             {
                 continue;
             }
@@ -48,24 +30,6 @@ public sealed class NewsletterPreferenceMapper(
         }
 
         return interestMap;
-    }
-
-    public bool AnyManagedFieldChanged(IReadOnlyList<string> updatedFields)
-    {
-        if (updatedFields.Count == 0)
-        {
-            return false;
-        }
-
-        var managedFields = _options.FieldMappings
-            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.PianoFieldName))
-            .Select(mapping => mapping.PianoFieldName.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return updatedFields
-            .Where(field => !string.IsNullOrWhiteSpace(field))
-            .Select(field => field.Trim())
-            .Any(managedFields.Contains);
     }
 
     private static object? TryGetCustomFieldValue(

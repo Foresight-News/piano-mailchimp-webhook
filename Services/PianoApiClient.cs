@@ -191,6 +191,11 @@ public sealed class PianoApiClient(
 
             var fieldName =
                 GetStringProperty(field, "field_name") ??
+                GetStringProperty(field, "fieldName") ??
+                GetStringProperty(field, "field") ??
+                GetStringProperty(field, "field_id") ??
+                GetStringProperty(field, "fieldId") ??
+                GetStringProperty(field, "id") ??
                 GetStringProperty(field, "name") ??
                 GetStringProperty(field, "key");
 
@@ -199,7 +204,14 @@ public sealed class PianoApiClient(
                 continue;
             }
 
-            if (TryGetProperty(field, out var value, "value", "field_value", "values"))
+            if (TryGetProperty(
+                    field,
+                    out var value,
+                    "value",
+                    "field_value",
+                    "fieldValue",
+                    "values",
+                    "val"))
             {
                 values[fieldName] = ConvertJsonValue(value);
             }
