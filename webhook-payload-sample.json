@@ -1,0 +1,12 @@
+{
+  "type": "user_updated",
+  "version": 2,
+  "typeTitle": "User updated",
+  "event": "piano_id_user_custom_fields_updated",
+  "eventTitle": "Piano id user custom fields updated",
+  "aid": "28C3eb1vpu",
+  "uid": "PNIP9h8uNt6ldu6",
+  "timestamp": "1777133250",
+  "user_email": "john.tangen@foresightnews.com",
+  "updated_custom_fields": "FN03"
+}
