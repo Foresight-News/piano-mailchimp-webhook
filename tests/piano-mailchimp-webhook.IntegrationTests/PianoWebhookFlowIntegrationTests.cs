@@ -257,7 +257,8 @@ public sealed class PianoWebhookFlowIntegrationTests
                 LastName = "Lovelace",
                 CustomFields = new Dictionary<string, object?>
                 {
-                    ["daily_news"] = true
+                    ["daily_news"] = false,
+                    ["sports_news"] = true
                 }
             });
 
@@ -269,7 +270,8 @@ public sealed class PianoWebhookFlowIntegrationTests
               "aid": "aid-123",
               "uid": "user-123",
               "timestamp": "1777133250",
-              "user_email": "ada@example.com"
+              "user_email": "ada@example.com",
+              "updated_custom_fields": "sports_news"
             }
             """);
 
@@ -277,7 +279,12 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(harness.PianoRequests);
-        Assert.Single(harness.MailchimpRequests);
+        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
+        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        var interests = requestBody.RootElement.GetProperty("interests");
+
+        Assert.False(interests.TryGetProperty("interest-daily", out _));
+        Assert.True(interests.GetProperty("interest-sports").GetBoolean());
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
@@ -348,6 +355,38 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+    }
+
+    [Fact]
+    public async Task UserUpdatedWithUpdatedCustomFieldsOnlyUpdatesThoseInterests()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["daily_news"] = false,
+                    ["sports_news"] = true
+                }
+            });
+
+        var result = await harness.SendWebhookAsync(
+            CreateWebhookEvent(
+                "user_updated",
+                updatedCustomFields: "sports_news"));
+
+        Assert.IsType<OkObjectResult>(result);
+
+        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
+        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        var interests = requestBody.RootElement.GetProperty("interests");
+
+        Assert.False(interests.TryGetProperty("interest-daily", out _));
+        Assert.True(interests.GetProperty("interest-sports").GetBoolean());
     }
 
     [Fact]

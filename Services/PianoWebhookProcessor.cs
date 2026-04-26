@@ -43,15 +43,15 @@ public sealed class PianoWebhookProcessor(
             return;
         }
 
-        var updatedFields = Array.Empty<string>();
-        var isCustomFieldsUpdate = string.Equals(
+        var updatedFields = webhookEvent.GetUpdatedCustomFields();
+        var hasSpecificUpdatedFields = updatedFields.Length > 0;
+        var isCustomFieldsUpdateEvent = string.Equals(
             eventName,
             "piano_id_user_custom_fields_updated",
             StringComparison.OrdinalIgnoreCase);
 
-        if (isCustomFieldsUpdate)
+        if (hasSpecificUpdatedFields || isCustomFieldsUpdateEvent)
         {
-            updatedFields = webhookEvent.GetUpdatedCustomFields();
             if (!newsletterPreferenceMapper.AnyManagedFieldChanged(updatedFields))
             {
                 logger.LogInformation(
@@ -97,7 +97,7 @@ public sealed class PianoWebhookProcessor(
                 ["LNAME"] = user.LastName,
                 ["PIANOID"] = user.Uid ?? uid
             },
-            Interests = isCustomFieldsUpdate
+            Interests = hasSpecificUpdatedFields
                 ? newsletterPreferenceMapper.BuildInterestMap(user, updatedFields)
                 : newsletterPreferenceMapper.BuildInterestMap(user)
         };
