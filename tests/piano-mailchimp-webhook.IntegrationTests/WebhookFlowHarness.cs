@@ -100,11 +100,17 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
             mailchimpAudienceService,
             newsletterPreferenceMapper,
             _loggerFactory.CreateLogger<PianoWebhookProcessor>());
+        var webhookDataParser = new PianoWebhookDataParser(
+            Options.Create(new PianoOptions
+            {
+                PrivateKey = "test-private-key"
+            }));
 
         _eventStore = new InMemoryPianoWebhookEventStore();
         _controller = new PianoWebhookController(
             _eventStore,
             processor,
+            webhookDataParser,
             _loggerFactory.CreateLogger<PianoWebhookController>());
     }
 
@@ -141,6 +147,24 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         };
 
         return await _controller.Receive(cancellationToken);
+    }
+
+    public async Task<IActionResult> SendGetWebhookAsync(
+        string? data = null,
+        CancellationToken cancellationToken = default)
+    {
+        var httpContext = new DefaultHttpContext();
+        if (!string.IsNullOrWhiteSpace(data))
+        {
+            httpContext.Request.QueryString = QueryString.Create("data", data);
+        }
+
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = httpContext
+        };
+
+        return await _controller.ReceiveEncrypted(data, cancellationToken);
     }
 
     public async Task<IReadOnlyList<PianoWebhookEventRecord>> ReadStoredRecordsAsync(

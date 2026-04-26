@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -147,6 +149,46 @@ public sealed class PianoWebhookFlowIntegrationTests
     }
 
     [Fact]
+    public async Task PianoUserCustomFieldsArrayIsUsedForMailchimpInterests()
+    {
+        var pianoResponseBody = """
+            {
+              "user": {
+                "uid": "user-123",
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "custom_fields": [
+                  {
+                    "field_name": "daily_news",
+                    "value": true
+                  },
+                  {
+                    "field_name": "sports_news",
+                    "value": "0"
+                  }
+                ]
+              }
+            }
+            """;
+
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile { Uid = "user-123" },
+            pianoResponseBody: pianoResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_updated"));
+
+        Assert.IsType<OkObjectResult>(result);
+
+        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
+        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        var interests = requestBody.RootElement.GetProperty("interests");
+
+        Assert.True(interests.GetProperty("interest-daily").GetBoolean());
+        Assert.False(interests.GetProperty("interest-sports").GetBoolean());
+    }
+
+    [Fact]
     public async Task FormUrlEncodedWebhookPayloadIsAccepted()
     {
         await using var harness = new WebhookFlowHarness(
@@ -174,6 +216,64 @@ public sealed class PianoWebhookFlowIntegrationTests
         var result = await harness.SendRawWebhookAsync(
             await content.ReadAsStringAsync(),
             "application/x-www-form-urlencoded");
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Single(harness.PianoRequests);
+        Assert.Single(harness.MailchimpRequests);
+
+        var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+        Assert.Equal("user_updated", storedRecord.Event);
+        Assert.Equal("user-123", storedRecord.Uid);
+    }
+
+    [Fact]
+    public async Task GetWebhookValidationRequestReturnsOkWithoutProcessing()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com"
+            });
+
+        var result = await harness.SendGetWebhookAsync();
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Empty(harness.PianoRequests);
+        Assert.Empty(harness.MailchimpRequests);
+        Assert.Empty(await harness.ReadStoredRecordsAsync());
+    }
+
+    [Fact]
+    public async Task EncryptedGetWebhookPayloadIsDecryptedAndProcessed()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["daily_news"] = true
+                }
+            });
+
+        var encryptedData = EncryptPianoWebhookData(
+            "test-private-key",
+            """
+            {
+              "type": "user_updated",
+              "aid": "aid-123",
+              "uid": "user-123",
+              "timestamp": "1777133250",
+              "user_email": "ada@example.com"
+            }
+            """);
+
+        var result = await harness.SendGetWebhookAsync(encryptedData);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(harness.PianoRequests);
@@ -243,7 +343,7 @@ public sealed class PianoWebhookFlowIntegrationTests
         using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
-        Assert.False(interests.GetProperty("interest-daily").GetBoolean());
+        Assert.False(interests.TryGetProperty("interest-daily", out _));
         Assert.True(interests.GetProperty("interest-sports").GetBoolean());
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
@@ -345,5 +445,49 @@ public sealed class PianoWebhookFlowIntegrationTests
             "..",
             "..",
             fileName));
+    }
+
+    private static string EncryptPianoWebhookData(string privateKey, string payload)
+    {
+        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+        var paddingLength = (16 - payloadBytes.Length % 16) % 16;
+        if (paddingLength > 0)
+        {
+            var paddedBytes = new byte[payloadBytes.Length + paddingLength];
+            payloadBytes.CopyTo(paddedBytes, 0);
+            Array.Fill(paddedBytes, (byte)paddingLength, payloadBytes.Length, paddingLength);
+            payloadBytes = paddedBytes;
+        }
+
+        using var aes = Aes.Create();
+        aes.Key = BuildCipherKey(privateKey);
+        aes.Mode = CipherMode.ECB;
+        aes.Padding = PaddingMode.None;
+
+        using var encryptor = aes.CreateEncryptor();
+        var encryptedBytes = encryptor.TransformFinalBlock(payloadBytes, 0, payloadBytes.Length);
+        var encryptedPayload = Base64UrlEncode(encryptedBytes);
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(privateKey));
+        var signature = Base64UrlEncode(hmac.ComputeHash(Encoding.UTF8.GetBytes(encryptedPayload)));
+
+        return $"{encryptedPayload}~~~{signature}";
+    }
+
+    private static byte[] BuildCipherKey(string privateKey)
+    {
+        var cipherKey = privateKey.Length > 32
+            ? privateKey[..32]
+            : privateKey.PadRight(32, 'X');
+
+        return Encoding.UTF8.GetBytes(cipherKey);
+    }
+
+    private static string Base64UrlEncode(byte[] value)
+    {
+        return Convert.ToBase64String(value)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 }

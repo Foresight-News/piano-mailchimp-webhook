@@ -5,5 +5,6 @@ namespace piano_mailchimp_webhook.Services;
 public interface INewsletterPreferenceMapper
 {
     Dictionary<string, bool> BuildInterestMap(PianoUserProfile user);
+    Dictionary<string, bool> BuildInterestMap(PianoUserProfile user, IReadOnlyList<string> pianoFieldNames);
     bool AnyManagedFieldChanged(IReadOnlyList<string> updatedFields);
 }

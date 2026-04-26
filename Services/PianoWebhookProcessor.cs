@@ -43,9 +43,15 @@ public sealed class PianoWebhookProcessor(
             return;
         }
 
-        if (string.Equals(eventName, "piano_id_user_custom_fields_updated", StringComparison.OrdinalIgnoreCase))
+        var updatedFields = Array.Empty<string>();
+        var isCustomFieldsUpdate = string.Equals(
+            eventName,
+            "piano_id_user_custom_fields_updated",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (isCustomFieldsUpdate)
         {
-            var updatedFields = webhookEvent.GetUpdatedCustomFields();
+            updatedFields = webhookEvent.GetUpdatedCustomFields();
             if (!newsletterPreferenceMapper.AnyManagedFieldChanged(updatedFields))
             {
                 logger.LogInformation(
@@ -91,7 +97,9 @@ public sealed class PianoWebhookProcessor(
                 ["LNAME"] = user.LastName,
                 ["PIANOID"] = user.Uid ?? uid
             },
-            Interests = newsletterPreferenceMapper.BuildInterestMap(user)
+            Interests = isCustomFieldsUpdate
+                ? newsletterPreferenceMapper.BuildInterestMap(user, updatedFields)
+                : newsletterPreferenceMapper.BuildInterestMap(user)
         };
 
         await mailchimpAudienceService.UpsertMemberAsync(request, cancellationToken);

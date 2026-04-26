@@ -43,6 +43,7 @@ builder.Services.AddHttpClient<IPianoApiClient, PianoApiClient>((serviceProvider
 });
 builder.Services.AddSingleton<IPianoWebhookEventStore, PianoWebhookEventStore>();
 builder.Services.AddSingleton<INewsletterPreferenceMapper, NewsletterPreferenceMapper>();
+builder.Services.AddSingleton<IPianoWebhookDataParser, PianoWebhookDataParser>();
 builder.Services.AddScoped<IPianoWebhookProcessor, PianoWebhookProcessor>();
 builder.Services.AddScoped<IPianoWebhookService, PianoWebhookService>();
 

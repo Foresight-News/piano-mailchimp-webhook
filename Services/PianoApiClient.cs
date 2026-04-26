@@ -114,9 +114,126 @@ public sealed class PianoApiClient(
             document.RootElement.TryGetProperty("user", out var userElement) &&
             userElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
-            return userElement.Deserialize<PianoUserProfile>(JsonOptions);
+            return DeserializeUserProfileElement(userElement);
         }
 
-        return document.RootElement.Deserialize<PianoUserProfile>(JsonOptions);
+        return DeserializeUserProfileElement(document.RootElement);
+    }
+
+    private static PianoUserProfile? DeserializeUserProfileElement(JsonElement element)
+    {
+        if (element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return new PianoUserProfile
+        {
+            Uid = GetStringProperty(element, "uid"),
+            Email = GetStringProperty(element, "email"),
+            FirstName = GetStringProperty(element, "first_name"),
+            LastName = GetStringProperty(element, "last_name"),
+            CustomFields = GetCustomFields(element)
+        };
+    }
+
+    private static string? GetStringProperty(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.GetRawText();
+    }
+
+    private static Dictionary<string, object?> GetCustomFields(JsonElement element)
+    {
+        if (!element.TryGetProperty("custom_fields", out var customFields) ||
+            customFields.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return [];
+        }
+
+        return customFields.ValueKind switch
+        {
+            JsonValueKind.Object => ParseCustomFieldsObject(customFields),
+            JsonValueKind.Array => ParseCustomFieldsArray(customFields),
+            _ => []
+        };
+    }
+
+    private static Dictionary<string, object?> ParseCustomFieldsObject(JsonElement customFields)
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var property in customFields.EnumerateObject())
+        {
+            values[property.Name] = ConvertJsonValue(property.Value);
+        }
+
+        return values;
+    }
+
+    private static Dictionary<string, object?> ParseCustomFieldsArray(JsonElement customFields)
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in customFields.EnumerateArray())
+        {
+            if (field.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var fieldName =
+                GetStringProperty(field, "field_name") ??
+                GetStringProperty(field, "name") ??
+                GetStringProperty(field, "key");
+
+            if (string.IsNullOrWhiteSpace(fieldName))
+            {
+                continue;
+            }
+
+            if (TryGetProperty(field, out var value, "value", "field_value", "values"))
+            {
+                values[fieldName] = ConvertJsonValue(value);
+            }
+        }
+
+        return values;
+    }
+
+    private static bool TryGetProperty(JsonElement element, out JsonElement value, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (element.TryGetProperty(propertyName, out value))
+            {
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static object? ConvertJsonValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.Undefined => null,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number when value.TryGetInt64(out var longValue) => longValue,
+            JsonValueKind.Number when value.TryGetDecimal(out var decimalValue) => decimalValue,
+            _ => value.Clone()
+        };
     }
 }

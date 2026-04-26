@@ -15,12 +15,30 @@ public sealed class NewsletterPreferenceMapper(
     {
         ArgumentNullException.ThrowIfNull(user);
 
+        return BuildInterestMap(user, _options.FieldMappings
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.PianoFieldName))
+            .Select(mapping => mapping.PianoFieldName)
+            .ToArray());
+    }
+
+    public Dictionary<string, bool> BuildInterestMap(
+        PianoUserProfile user,
+        IReadOnlyList<string> pianoFieldNames)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(pianoFieldNames);
+
+        var requestedFields = pianoFieldNames
+            .Where(fieldName => !string.IsNullOrWhiteSpace(fieldName))
+            .Select(fieldName => fieldName.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var interestMap = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var mapping in _options.FieldMappings)
         {
             if (string.IsNullOrWhiteSpace(mapping.PianoFieldName) ||
-                string.IsNullOrWhiteSpace(mapping.MailchimpInterestId))
+                string.IsNullOrWhiteSpace(mapping.MailchimpInterestId) ||
+                !requestedFields.Contains(mapping.PianoFieldName.Trim()))
             {
                 continue;
             }

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,9 +13,51 @@ namespace piano_mailchimp_webhook.Controllers;
 public sealed class PianoWebhookController(
     IPianoWebhookEventStore eventStore,
     IPianoWebhookProcessor webhookProcessor,
+    IPianoWebhookDataParser webhookDataParser,
     ILogger<PianoWebhookController> logger) : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    [HttpGet]
+    public async Task<IActionResult> ReceiveEncrypted(
+        [FromQuery] string? data = null,
+        CancellationToken cancellationToken = default)
+    {
+        logger.LogInformation(
+            "Received Piano webhook GET request. Data parameter present: {HasData}.",
+            !string.IsNullOrWhiteSpace(data));
+
+        if (string.IsNullOrWhiteSpace(data))
+        {
+            return Ok(new
+            {
+                success = true
+            });
+        }
+
+        PianoWebhookEvent? webhookEvent = null;
+        var storedEvent = default(PianoWebhookEventRecord);
+
+        try
+        {
+            webhookEvent = webhookDataParser.Parse(data);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or JsonException or FormatException or CryptographicException)
+        {
+            storedEvent = await eventStore.SaveReceivedAsync(null, data, cancellationToken);
+            await eventStore.MarkInvalidPayloadAsync(storedEvent.Id, exception.Message, cancellationToken);
+
+            logger.LogWarning(exception, "Received an invalid encrypted Piano webhook payload.");
+
+            return BadRequest(new
+            {
+                success = false,
+                error = "Invalid payload"
+            });
+        }
+
+        return await ProcessReceivedEventAsync(webhookEvent, data, cancellationToken);
+    }
 
     [HttpPost]
     public async Task<IActionResult> Receive(CancellationToken cancellationToken)
@@ -46,7 +89,15 @@ public sealed class PianoWebhookController(
             });
         }
 
-        storedEvent = await eventStore.SaveReceivedAsync(webhookEvent, rawPayload, cancellationToken);
+        return await ProcessReceivedEventAsync(webhookEvent, rawPayload, cancellationToken);
+    }
+
+    private async Task<IActionResult> ProcessReceivedEventAsync(
+        PianoWebhookEvent? webhookEvent,
+        string rawPayload,
+        CancellationToken cancellationToken)
+    {
+        var storedEvent = await eventStore.SaveReceivedAsync(webhookEvent, rawPayload, cancellationToken);
 
         if (webhookEvent is null)
         {
@@ -113,12 +164,12 @@ public sealed class PianoWebhookController(
 
         if (IsJsonPayload(rawPayload, contentType))
         {
-            return JsonSerializer.Deserialize<PianoWebhookEvent>(rawPayload, JsonOptions);
+            return NormalizeWebhookEvent(JsonSerializer.Deserialize<PianoWebhookEvent>(rawPayload, JsonOptions));
         }
 
         var values = QueryHelpers.ParseQuery(rawPayload);
 
-        return new PianoWebhookEvent
+        return NormalizeWebhookEvent(new PianoWebhookEvent
         {
             Type = GetFormValue(values, "type"),
             Event = GetFormValue(values, "event"),
@@ -128,6 +179,24 @@ public sealed class PianoWebhookController(
             UpdatedCustomFields =
                 GetFormValue(values, "Updated_custom_fields") ??
                 GetFormValue(values, "updated_custom_fields")
+        });
+    }
+
+    private static PianoWebhookEvent? NormalizeWebhookEvent(PianoWebhookEvent? webhookEvent)
+    {
+        if (webhookEvent is null || !string.IsNullOrWhiteSpace(webhookEvent.Event))
+        {
+            return webhookEvent;
+        }
+
+        return new PianoWebhookEvent
+        {
+            Type = webhookEvent.Type,
+            Event = webhookEvent.Type,
+            Uid = webhookEvent.Uid,
+            Aid = webhookEvent.Aid,
+            Timestamp = webhookEvent.Timestamp,
+            UpdatedCustomFields = webhookEvent.UpdatedCustomFields
         };
     }
 
