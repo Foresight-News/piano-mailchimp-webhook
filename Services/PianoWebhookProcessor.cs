@@ -82,6 +82,7 @@ public sealed class PianoWebhookProcessor(
         };
 
         await mailchimpAudienceService.UpsertMemberAsync(request, cancellationToken);
+        await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
 
         logger.LogInformation(
             "Upserted Mailchimp audience member for Piano uid {Uid} and email {EmailAddress}.",

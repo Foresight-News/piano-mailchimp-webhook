@@ -44,13 +44,15 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.Contains("aid=test-application", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
         Assert.Contains("api_token=test-piano-token", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        Assert.Equal(HttpMethod.Put, mailchimpRequest.Method);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        var mailchimpUpsertRequest = harness.MailchimpRequests[0];
+        Assert.Equal(HttpMethod.Put, mailchimpUpsertRequest.Method);
         Assert.Equal(
             $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}",
-            mailchimpRequest.RequestUri.AbsolutePath);
+            mailchimpUpsertRequest.RequestUri.AbsolutePath);
 
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        using var requestBody = JsonDocument.Parse(mailchimpUpsertRequest.Body!);
         var root = requestBody.RootElement;
 
         Assert.Equal("ada@example.com", root.GetProperty("email_address").GetString());
@@ -100,8 +102,8 @@ public sealed class PianoWebhookFlowIntegrationTests
         var pianoRequest = Assert.Single(harness.PianoRequests);
         Assert.Contains("uid=PNIP9h8uNt6ldu6", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var root = requestBody.RootElement;
 
         Assert.Equal("john.tangen@foresightnews.com", root.GetProperty("email_address").GetString());
@@ -139,8 +141,8 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(harness.PianoRequests);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var root = requestBody.RootElement;
 
         Assert.Equal("ada@example.com", root.GetProperty("email_address").GetString());
@@ -180,8 +182,8 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.True(interests.GetProperty("interest-daily").GetBoolean());
@@ -231,8 +233,8 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.True(interests.GetProperty("interest-fn01").GetBoolean());
@@ -270,7 +272,7 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(harness.PianoRequests);
-        Assert.Single(harness.MailchimpRequests);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
@@ -330,8 +332,9 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(harness.PianoRequests);
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.False(interests.GetProperty("interest-daily").GetBoolean());
@@ -360,7 +363,7 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(harness.PianoRequests);
-        Assert.Single(harness.MailchimpRequests);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
@@ -391,8 +394,8 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(harness.PianoRequests);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.False(interests.GetProperty("interest-daily").GetBoolean());
@@ -426,12 +429,42 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.False(interests.GetProperty("interest-daily").GetBoolean());
         Assert.True(interests.GetProperty("interest-sports").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PaidTagIsAddedToMailchimpMemberAfterUpsert()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace"
+            });
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        var tagsRequest = harness.MailchimpRequests[1];
+        Assert.Equal(HttpMethod.Post, tagsRequest.Method);
+        Assert.Equal(
+            $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
+            tagsRequest.RequestUri.AbsolutePath);
+
+        using var tagsBody = JsonDocument.Parse(tagsRequest.Body!);
+        var tags = tagsBody.RootElement.GetProperty("tags");
+        Assert.Equal(1, tags.GetArrayLength());
+        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
+        Assert.Equal("active", tags[0].GetProperty("status").GetString());
     }
 
     [Fact]
