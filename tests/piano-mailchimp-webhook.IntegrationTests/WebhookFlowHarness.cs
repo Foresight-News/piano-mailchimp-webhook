@@ -25,6 +25,7 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         PianoUserProfile? pianoUser,
         IReadOnlyList<NewsletterFieldMapping>? fieldMappings = null,
         string? pianoResponseBody = null,
+        string? pianoAccessResponseBody = null,
         HttpStatusCode mailchimpStatusCode = HttpStatusCode.OK,
         string mailchimpResponseBody = "{}")
     {
@@ -34,8 +35,30 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
             builder.AddProvider(_logSink);
         });
 
-        var pianoHandler = new RecordingHttpMessageHandler((_, _) =>
+        var pianoHandler = new RecordingHttpMessageHandler((request, _) =>
         {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/publisher/user/access/list", StringComparison.Ordinal) == true)
+            {
+                var accessResponseBody = pianoAccessResponseBody ??
+                    """
+                    {
+                      "accesses": [
+                        {
+                          "resource_id": "paid-resource",
+                          "granted": "true",
+                          "start_date": "2020-01-01T00:00:00Z",
+                          "expiry_date": "2099-12-31T23:59:59Z"
+                        }
+                      ]
+                    }
+                    """;
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(accessResponseBody, Encoding.UTF8, "application/json")
+                });
+            }
+
             if (pianoUser is null)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
@@ -95,16 +118,23 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
                 ]
             }));
 
+        var pianoOptions = Options.Create(new PianoOptions
+        {
+            BaseUrl = "https://piano.example.test",
+            ApiToken = "test-piano-token",
+            ApplicationId = "test-application",
+            PrivateKey = "test-private-key",
+            PaidResourceIds = ["paid-resource"]
+        });
+
         var processor = new PianoWebhookProcessor(
             pianoApiClient,
             mailchimpAudienceService,
             newsletterPreferenceMapper,
+            pianoOptions,
             _loggerFactory.CreateLogger<PianoWebhookProcessor>());
         var webhookDataParser = new PianoWebhookDataParser(
-            Options.Create(new PianoOptions
-            {
-                PrivateKey = "test-private-key"
-            }));
+            pianoOptions);
 
         _eventStore = new InMemoryPianoWebhookEventStore();
         _controller = new PianoWebhookController(
