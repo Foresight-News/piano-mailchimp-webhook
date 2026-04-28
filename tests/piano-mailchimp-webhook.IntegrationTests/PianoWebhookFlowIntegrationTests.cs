@@ -37,20 +37,23 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var pianoRequest = Assert.Single(harness.PianoRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        var pianoRequest = harness.PianoRequests[0];
         Assert.Equal(HttpMethod.Get, pianoRequest.Method);
         Assert.Equal("/api/v3/publisher/user/get", pianoRequest.RequestUri.AbsolutePath);
         Assert.Contains("uid=user-123", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
         Assert.Contains("aid=test-application", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
         Assert.Contains("api_token=test-piano-token", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        Assert.Equal(HttpMethod.Put, mailchimpRequest.Method);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        var mailchimpUpsertRequest = harness.MailchimpRequests[0];
+        Assert.Equal(HttpMethod.Put, mailchimpUpsertRequest.Method);
         Assert.Equal(
             $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}",
-            mailchimpRequest.RequestUri.AbsolutePath);
+            mailchimpUpsertRequest.RequestUri.AbsolutePath);
 
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        using var requestBody = JsonDocument.Parse(mailchimpUpsertRequest.Body!);
         var root = requestBody.RootElement;
 
         Assert.Equal("ada@example.com", root.GetProperty("email_address").GetString());
@@ -97,11 +100,12 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var pianoRequest = Assert.Single(harness.PianoRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        var pianoRequest = harness.PianoRequests[0];
         Assert.Contains("uid=PNIP9h8uNt6ldu6", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var root = requestBody.RootElement;
 
         Assert.Equal("john.tangen@foresightnews.com", root.GetProperty("email_address").GetString());
@@ -137,10 +141,10 @@ public sealed class PianoWebhookFlowIntegrationTests
         var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_updated"));
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Single(harness.PianoRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var root = requestBody.RootElement;
 
         Assert.Equal("ada@example.com", root.GetProperty("email_address").GetString());
@@ -180,8 +184,8 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.True(interests.GetProperty("interest-daily").GetBoolean());
@@ -231,8 +235,8 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.True(interests.GetProperty("interest-fn01").GetBoolean());
@@ -269,8 +273,8 @@ public sealed class PianoWebhookFlowIntegrationTests
             "application/x-www-form-urlencoded");
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Single(harness.PianoRequests);
-        Assert.Single(harness.MailchimpRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
@@ -329,9 +333,10 @@ public sealed class PianoWebhookFlowIntegrationTests
         var result = await harness.SendGetWebhookAsync(encryptedData);
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Single(harness.PianoRequests);
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.PianoRequests.Count);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.False(interests.GetProperty("interest-daily").GetBoolean());
@@ -359,8 +364,8 @@ public sealed class PianoWebhookFlowIntegrationTests
                 updatedCustomFields: "profile_color, favorite_topic"));
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Single(harness.PianoRequests);
-        Assert.Single(harness.MailchimpRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
@@ -389,10 +394,10 @@ public sealed class PianoWebhookFlowIntegrationTests
                 updatedCustomFields: "profile_color, sports_news"));
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Single(harness.PianoRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.False(interests.GetProperty("interest-daily").GetBoolean());
@@ -426,12 +431,76 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.False(interests.GetProperty("interest-daily").GetBoolean());
         Assert.True(interests.GetProperty("interest-sports").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PaidTagIsAddedToMailchimpMemberAfterUpsert()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace"
+            });
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        var tagsRequest = harness.MailchimpRequests[1];
+        Assert.Equal(HttpMethod.Post, tagsRequest.Method);
+        Assert.Equal(
+            $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
+            tagsRequest.RequestUri.AbsolutePath);
+
+        using var tagsBody = JsonDocument.Parse(tagsRequest.Body!);
+        var tags = tagsBody.RootElement.GetProperty("tags");
+        Assert.Equal(1, tags.GetArrayLength());
+        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
+        Assert.Equal("active", tags[0].GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [MemberData(nameof(InactivePaidAccessResponses))]
+    public async Task PaidTagIsRemovedWhenConfiguredResourceIsNotGrantedForToday(string pianoAccessResponseBody)
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace"
+            },
+            pianoAccessResponseBody: pianoAccessResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        Assert.Equal(HttpMethod.Put, harness.MailchimpRequests[0].Method);
+
+        var tagsRequest = harness.MailchimpRequests[1];
+        Assert.Equal(HttpMethod.Post, tagsRequest.Method);
+        Assert.Equal(
+            $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
+            tagsRequest.RequestUri.AbsolutePath);
+
+        using var tagsBody = JsonDocument.Parse(tagsRequest.Body!);
+        var tags = tagsBody.RootElement.GetProperty("tags");
+        Assert.Equal(1, tags.GetArrayLength());
+        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
+        Assert.Equal("inactive", tags[0].GetProperty("status").GetString());
     }
 
     [Fact]
@@ -517,6 +586,73 @@ public sealed class PianoWebhookFlowIntegrationTests
             Timestamp = DateTimeOffset.UtcNow.ToString("O"),
             UpdatedCustomFields = updatedCustomFields
         };
+    }
+
+    public static IEnumerable<object[]> InactivePaidAccessResponses()
+    {
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "paid-resource",
+                  "granted": "false",
+                  "start_date": "2020-01-01T00:00:00Z",
+                  "expiry_date": "2099-12-31T23:59:59Z"
+                }
+              ]
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "paid-resource",
+                  "granted": "true",
+                  "start_date": "2020-01-01T00:00:00Z",
+                  "expiry_date": "2021-01-01T00:00:00Z"
+                }
+              ]
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "paid-resource",
+                  "granted": "true",
+                  "start_date": "2099-01-01T00:00:00Z",
+                  "expiry_date": "2099-12-31T23:59:59Z"
+                }
+              ]
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "other-resource",
+                  "granted": "true",
+                  "start_date": "2020-01-01T00:00:00Z",
+                  "expiry_date": "2099-12-31T23:59:59Z"
+                }
+              ]
+            }
+            """
+        ];
     }
 
     private static string GetRepositoryFilePath(string fileName)

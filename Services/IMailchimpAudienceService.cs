@@ -7,4 +7,14 @@ public interface IMailchimpAudienceService
     Task UpsertMemberAsync(
         MailchimpMemberUpsertRequest request,
         CancellationToken cancellationToken = default);
+
+    Task AddMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        CancellationToken cancellationToken = default);
+
+    Task RemoveMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        CancellationToken cancellationToken = default);
 }

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using piano_mailchimp_webhook.Config;
 using piano_mailchimp_webhook.Models;
 
 namespace piano_mailchimp_webhook.Services;
@@ -6,6 +8,7 @@ public sealed class PianoWebhookProcessor(
     IPianoApiClient pianoApiClient,
     IMailchimpAudienceService mailchimpAudienceService,
     INewsletterPreferenceMapper newsletterPreferenceMapper,
+    IOptions<PianoOptions> pianoOptions,
     ILogger<PianoWebhookProcessor> logger) : IPianoWebhookProcessor
 {
     private static readonly HashSet<string> SupportedEvents = new(StringComparer.OrdinalIgnoreCase)
@@ -82,6 +85,19 @@ public sealed class PianoWebhookProcessor(
         };
 
         await mailchimpAudienceService.UpsertMemberAsync(request, cancellationToken);
+        var hasPaidAccess = await pianoApiClient.HasActiveAccessToAnyResourceAsync(
+            uid,
+            pianoOptions.Value.PaidResourceIds,
+            cancellationToken);
+
+        if (hasPaidAccess)
+        {
+            await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
+        }
+        else
+        {
+            await mailchimpAudienceService.RemoveMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
+        }
 
         logger.LogInformation(
             "Upserted Mailchimp audience member for Piano uid {Uid} and email {EmailAddress}.",
