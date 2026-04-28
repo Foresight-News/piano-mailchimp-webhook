@@ -53,6 +53,23 @@ public sealed class MailchimpAudienceService(
         IEnumerable<string> tags,
         CancellationToken cancellationToken = default)
     {
+        await UpdateMemberTagsAsync(email, tags, "active", cancellationToken);
+    }
+
+    public async Task RemoveMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        CancellationToken cancellationToken = default)
+    {
+        await UpdateMemberTagsAsync(email, tags, "inactive", cancellationToken);
+    }
+
+    private async Task UpdateMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        string status,
+        CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(email))
         {
             throw new ArgumentException("Email address is required.", nameof(email));
@@ -66,7 +83,7 @@ public sealed class MailchimpAudienceService(
         var requestUri = $"lists/{mailchimpOptions.AudienceId}/members/{subscriberHash}/tags";
         var body = new
         {
-            tags = tags.Select(t => new { name = t, status = "active" }).ToList()
+            tags = tags.Select(t => new { name = t, status }).ToList()
         };
 
         using var response = await httpClient.PostAsJsonAsync(requestUri, body, cancellationToken);

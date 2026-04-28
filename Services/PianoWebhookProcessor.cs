@@ -94,6 +94,10 @@ public sealed class PianoWebhookProcessor(
         {
             await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
         }
+        else
+        {
+            await mailchimpAudienceService.RemoveMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
+        }
 
         logger.LogInformation(
             "Upserted Mailchimp audience member for Piano uid {Uid} and email {EmailAddress}.",

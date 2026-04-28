@@ -12,4 +12,9 @@ public interface IMailchimpAudienceService
         string email,
         IEnumerable<string> tags,
         CancellationToken cancellationToken = default);
+
+    Task RemoveMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        CancellationToken cancellationToken = default);
 }

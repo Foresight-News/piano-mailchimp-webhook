@@ -471,7 +471,7 @@ public sealed class PianoWebhookFlowIntegrationTests
 
     [Theory]
     [MemberData(nameof(InactivePaidAccessResponses))]
-    public async Task PaidTagIsSkippedWhenConfiguredResourceIsNotGrantedForToday(string pianoAccessResponseBody)
+    public async Task PaidTagIsRemovedWhenConfiguredResourceIsNotGrantedForToday(string pianoAccessResponseBody)
     {
         await using var harness = new WebhookFlowHarness(
             new PianoUserProfile
@@ -487,8 +487,20 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Equal(2, harness.PianoRequests.Count);
-        Assert.Single(harness.MailchimpRequests);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
         Assert.Equal(HttpMethod.Put, harness.MailchimpRequests[0].Method);
+
+        var tagsRequest = harness.MailchimpRequests[1];
+        Assert.Equal(HttpMethod.Post, tagsRequest.Method);
+        Assert.Equal(
+            $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
+            tagsRequest.RequestUri.AbsolutePath);
+
+        using var tagsBody = JsonDocument.Parse(tagsRequest.Body!);
+        var tags = tagsBody.RootElement.GetProperty("tags");
+        Assert.Equal(1, tags.GetArrayLength());
+        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
+        Assert.Equal("inactive", tags[0].GetProperty("status").GetString());
     }
 
     [Fact]
