@@ -1,2 +1,8 @@
 bin/
 obj/
+
+.vs/
+
+Properties/PublishProfiles/
+
+publish/

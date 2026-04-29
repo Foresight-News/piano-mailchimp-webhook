@@ -7,4 +7,6 @@ public sealed class PianoOptions
     public string BaseUrl { get; init; } = "https://api.piano.io";
     public string ApiToken { get; init; } = string.Empty;
     public string ApplicationId { get; init; } = string.Empty;
+    public string PrivateKey { get; init; } = string.Empty;
+    public List<string> PaidResourceIds { get; init; } = [];
 }

@@ -32,24 +32,6 @@ public sealed class NewsletterPreferenceMapper(
         return interestMap;
     }
 
-    public bool AnyManagedFieldChanged(IReadOnlyList<string> updatedFields)
-    {
-        if (updatedFields.Count == 0)
-        {
-            return false;
-        }
-
-        var managedFields = _options.FieldMappings
-            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.PianoFieldName))
-            .Select(mapping => mapping.PianoFieldName.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return updatedFields
-            .Where(field => !string.IsNullOrWhiteSpace(field))
-            .Select(field => field.Trim())
-            .Any(managedFields.Contains);
-    }
-
     private static object? TryGetCustomFieldValue(
         IReadOnlyDictionary<string, object?> customFields,
         string pianoFieldName)

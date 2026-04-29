@@ -48,6 +48,65 @@ public sealed class MailchimpAudienceService(
             response.StatusCode);
     }
 
+    public async Task AddMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        CancellationToken cancellationToken = default)
+    {
+        await UpdateMemberTagsAsync(email, tags, "active", cancellationToken);
+    }
+
+    public async Task RemoveMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        CancellationToken cancellationToken = default)
+    {
+        await UpdateMemberTagsAsync(email, tags, "inactive", cancellationToken);
+    }
+
+    private async Task UpdateMemberTagsAsync(
+        string email,
+        IEnumerable<string> tags,
+        string status,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            throw new ArgumentException("Email address is required.", nameof(email));
+        }
+
+        var mailchimpOptions = options.Value;
+        var subscriberHash = SubscriberHash.FromEmail(email);
+
+        ConfigureClient(mailchimpOptions);
+
+        var requestUri = $"lists/{mailchimpOptions.AudienceId}/members/{subscriberHash}/tags";
+        var body = new
+        {
+            tags = tags.Select(t => new { name = t, status }).ToList()
+        };
+
+        using var response = await httpClient.PostAsJsonAsync(requestUri, body, cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        logger.LogError(
+            "Mailchimp member tag update failed for {EmailAddress}. Status: {StatusCode}. Response: {ResponseBody}",
+            email,
+            (int)response.StatusCode,
+            errorBody);
+
+        throw new HttpRequestException(
+            $"Mailchimp member tag update failed with status code {(int)response.StatusCode}.",
+            null,
+            response.StatusCode);
+    }
+
     private void ConfigureClient(MailchimpOptions mailchimpOptions)
     {
         if (string.IsNullOrWhiteSpace(mailchimpOptions.ServerPrefix))
@@ -65,7 +124,7 @@ public sealed class MailchimpAudienceService(
             throw new InvalidOperationException("Mailchimp AudienceId is not configured.");
         }
 
-        httpClient.BaseAddress = new Uri(
+        httpClient.BaseAddress ??= new Uri(
             $"https://{mailchimpOptions.ServerPrefix}.api.mailchimp.com/3.0/",
             UriKind.Absolute);
 

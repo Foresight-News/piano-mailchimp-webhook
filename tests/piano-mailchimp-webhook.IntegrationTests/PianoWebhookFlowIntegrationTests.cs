@@ -1,7 +1,11 @@
 using System.Net;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using piano_mailchimp_webhook.Config;
 using piano_mailchimp_webhook.Models;
 using piano_mailchimp_webhook.Services;
 using Xunit;
@@ -33,20 +37,23 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         Assert.IsType<OkObjectResult>(result);
 
-        var pianoRequest = Assert.Single(harness.PianoRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        var pianoRequest = harness.PianoRequests[0];
         Assert.Equal(HttpMethod.Get, pianoRequest.Method);
         Assert.Equal("/api/v3/publisher/user/get", pianoRequest.RequestUri.AbsolutePath);
         Assert.Contains("uid=user-123", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
         Assert.Contains("aid=test-application", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
         Assert.Contains("api_token=test-piano-token", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        Assert.Equal(HttpMethod.Put, mailchimpRequest.Method);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        var mailchimpUpsertRequest = harness.MailchimpRequests[0];
+        Assert.Equal(HttpMethod.Put, mailchimpUpsertRequest.Method);
         Assert.Equal(
             $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}",
-            mailchimpRequest.RequestUri.AbsolutePath);
+            mailchimpUpsertRequest.RequestUri.AbsolutePath);
 
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        using var requestBody = JsonDocument.Parse(mailchimpUpsertRequest.Body!);
         var root = requestBody.RootElement;
 
         Assert.Equal("ada@example.com", root.GetProperty("email_address").GetString());
@@ -64,7 +71,285 @@ public sealed class PianoWebhookFlowIntegrationTests
     }
 
     [Fact]
-    public async Task CustomFieldUpdateIsIgnoredWhenNoManagedFieldsChanged()
+    public async Task SamplePianoPayloadRefreshesManagedCustomField()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "PNIP9h8uNt6ldu6",
+                Email = "john.tangen@foresightnews.com",
+                FirstName = "John",
+                LastName = "Tangen",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["FN03"] = true
+                }
+            },
+            fieldMappings:
+            [
+                new NewsletterFieldMapping
+                {
+                    PianoFieldName = "FN03",
+                    MailchimpInterestId = "interest-fn03"
+                }
+            ]);
+
+        var samplePayload = await File.ReadAllTextAsync(GetRepositoryFilePath("webhook-payload-sample.json"));
+
+        var result = await harness.SendRawWebhookAsync(samplePayload, "application/json");
+
+        Assert.IsType<OkObjectResult>(result);
+
+        Assert.Equal(2, harness.PianoRequests.Count);
+        var pianoRequest = harness.PianoRequests[0];
+        Assert.Contains("uid=PNIP9h8uNt6ldu6", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
+        var root = requestBody.RootElement;
+
+        Assert.Equal("john.tangen@foresightnews.com", root.GetProperty("email_address").GetString());
+        Assert.True(root.GetProperty("interests").GetProperty("interest-fn03").GetBoolean());
+
+        var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+        Assert.Equal("piano_id_user_custom_fields_updated", storedRecord.Event);
+        Assert.Equal("PNIP9h8uNt6ldu6", storedRecord.Uid);
+    }
+
+    [Fact]
+    public async Task EnvelopedPianoUserResponseIsUsedForMailchimpSync()
+    {
+        var pianoResponseBody = """
+            {
+              "user": {
+                "uid": "user-123",
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "custom_fields": {
+                  "daily_news": true
+                }
+              }
+            }
+            """;
+
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile { Uid = "user-123" },
+            pianoResponseBody: pianoResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_updated"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.PianoRequests.Count);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
+        var root = requestBody.RootElement;
+
+        Assert.Equal("ada@example.com", root.GetProperty("email_address").GetString());
+        Assert.Equal("Ada", root.GetProperty("merge_fields").GetProperty("FNAME").GetString());
+        Assert.True(root.GetProperty("interests").GetProperty("interest-daily").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PianoUserCustomFieldsArrayIsUsedForMailchimpInterests()
+    {
+        var pianoResponseBody = """
+            {
+              "user": {
+                "uid": "user-123",
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "custom_fields": [
+                  {
+                    "fieldName": "daily_news",
+                    "value": true
+                  },
+                  {
+                    "fieldName": "sports_news",
+                    "value": "0"
+                  }
+                ]
+              }
+            }
+            """;
+
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile { Uid = "user-123" },
+            pianoResponseBody: pianoResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_updated"));
+
+        Assert.IsType<OkObjectResult>(result);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
+        var interests = requestBody.RootElement.GetProperty("interests");
+
+        Assert.True(interests.GetProperty("interest-daily").GetBoolean());
+        Assert.False(interests.GetProperty("interest-sports").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PianoUserCustomFieldsArrayWithPianoFieldNameCasingIsUsedForMailchimpInterests()
+    {
+        var pianoResponseBody = """
+            {
+              "user": {
+                "uid": "user-123",
+                "email": "ada@example.com",
+                "custom_fields": [
+                  {
+                    "fieldName": "FN01",
+                    "value": "true"
+                  },
+                  {
+                    "fieldName": "MktP14",
+                    "value": "false"
+                  }
+                ]
+              }
+            }
+            """;
+
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile { Uid = "user-123" },
+            fieldMappings:
+            [
+                new NewsletterFieldMapping
+                {
+                    PianoFieldName = "FN01",
+                    MailchimpInterestId = "interest-fn01"
+                },
+                new NewsletterFieldMapping
+                {
+                    PianoFieldName = "MktP14",
+                    MailchimpInterestId = "interest-marketing"
+                }
+            ],
+            pianoResponseBody: pianoResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_updated"));
+
+        Assert.IsType<OkObjectResult>(result);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
+        var interests = requestBody.RootElement.GetProperty("interests");
+
+        Assert.True(interests.GetProperty("interest-fn01").GetBoolean());
+        Assert.False(interests.GetProperty("interest-marketing").GetBoolean());
+    }
+
+    [Fact]
+    public async Task FormUrlEncodedWebhookPayloadIsAccepted()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["daily_news"] = true,
+                    ["sports_news"] = false
+                }
+            });
+
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["event"] = "user_updated",
+            ["uid"] = "user-123",
+            ["aid"] = "aid-123",
+            ["timestamp"] = DateTimeOffset.UtcNow.ToString("O")
+        });
+
+        var result = await harness.SendRawWebhookAsync(
+            await content.ReadAsStringAsync(),
+            "application/x-www-form-urlencoded");
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+        Assert.Equal("user_updated", storedRecord.Event);
+        Assert.Equal("user-123", storedRecord.Uid);
+    }
+
+    [Fact]
+    public async Task GetWebhookValidationRequestReturnsOkWithoutProcessing()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com"
+            });
+
+        var result = await harness.SendGetWebhookAsync();
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Empty(harness.PianoRequests);
+        Assert.Empty(harness.MailchimpRequests);
+        Assert.Empty(await harness.ReadStoredRecordsAsync());
+    }
+
+    [Fact]
+    public async Task EncryptedGetWebhookPayloadIsDecryptedAndProcessed()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["daily_news"] = false,
+                    ["sports_news"] = true
+                }
+            });
+
+        var encryptedData = EncryptPianoWebhookData(
+            "test-private-key",
+            """
+            {
+              "type": "user_updated",
+              "aid": "aid-123",
+              "uid": "user-123",
+              "timestamp": "1777133250",
+              "user_email": "ada@example.com",
+              "updated_custom_fields": "sports_news"
+            }
+            """);
+
+        var result = await harness.SendGetWebhookAsync(encryptedData);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.PianoRequests.Count);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
+        var interests = requestBody.RootElement.GetProperty("interests");
+
+        Assert.False(interests.GetProperty("interest-daily").GetBoolean());
+        Assert.True(interests.GetProperty("interest-sports").GetBoolean());
+
+        var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
+        Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+        Assert.Equal("user_updated", storedRecord.Event);
+        Assert.Equal("user-123", storedRecord.Uid);
+    }
+
+    [Fact]
+    public async Task CustomFieldUpdateSyncsAllMappedInterestsEvenWhenUpdatedFieldsAreUnmanaged()
     {
         await using var harness = new WebhookFlowHarness(
             new PianoUserProfile
@@ -79,14 +364,8 @@ public sealed class PianoWebhookFlowIntegrationTests
                 updatedCustomFields: "profile_color, favorite_topic"));
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Empty(harness.PianoRequests);
-        Assert.Empty(harness.MailchimpRequests);
-        Assert.Contains(
-            harness.Logs,
-            entry => entry.Level == LogLevel.Information &&
-                     entry.Message.Contains(
-                         "none of the changed fields are newsletter-managed",
-                         StringComparison.Ordinal));
+        Assert.Equal(2, harness.PianoRequests.Count);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
@@ -115,10 +394,10 @@ public sealed class PianoWebhookFlowIntegrationTests
                 updatedCustomFields: "profile_color, sports_news"));
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Single(harness.PianoRequests);
+        Assert.Equal(2, harness.PianoRequests.Count);
 
-        var mailchimpRequest = Assert.Single(harness.MailchimpRequests);
-        using var requestBody = JsonDocument.Parse(mailchimpRequest.Body!);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
         var interests = requestBody.RootElement.GetProperty("interests");
 
         Assert.False(interests.GetProperty("interest-daily").GetBoolean());
@@ -126,6 +405,102 @@ public sealed class PianoWebhookFlowIntegrationTests
 
         var storedRecord = Assert.Single(await harness.ReadStoredRecordsAsync());
         Assert.Equal(PianoWebhookEventStatuses.Processed, storedRecord.Status);
+    }
+
+    [Fact]
+    public async Task UserUpdatedWithUpdatedCustomFieldsSyncsAllMappedInterests()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace",
+                CustomFields = new Dictionary<string, object?>
+                {
+                    ["daily_news"] = false,
+                    ["sports_news"] = true
+                }
+            });
+
+        var result = await harness.SendWebhookAsync(
+            CreateWebhookEvent(
+                "user_updated",
+                updatedCustomFields: "sports_news"));
+
+        Assert.IsType<OkObjectResult>(result);
+
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        using var requestBody = JsonDocument.Parse(harness.MailchimpRequests[0].Body!);
+        var interests = requestBody.RootElement.GetProperty("interests");
+
+        Assert.False(interests.GetProperty("interest-daily").GetBoolean());
+        Assert.True(interests.GetProperty("interest-sports").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PaidTagIsAddedToMailchimpMemberAfterUpsert()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace"
+            });
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        var tagsRequest = harness.MailchimpRequests[1];
+        Assert.Equal(HttpMethod.Post, tagsRequest.Method);
+        Assert.Equal(
+            $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
+            tagsRequest.RequestUri.AbsolutePath);
+
+        using var tagsBody = JsonDocument.Parse(tagsRequest.Body!);
+        var tags = tagsBody.RootElement.GetProperty("tags");
+        Assert.Equal(1, tags.GetArrayLength());
+        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
+        Assert.Equal("active", tags[0].GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [MemberData(nameof(InactivePaidAccessResponses))]
+    public async Task PaidTagIsRemovedWhenConfiguredResourceIsNotGrantedForToday(string pianoAccessResponseBody)
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace"
+            },
+            pianoAccessResponseBody: pianoAccessResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.PianoRequests.Count);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        Assert.Equal(HttpMethod.Put, harness.MailchimpRequests[0].Method);
+
+        var tagsRequest = harness.MailchimpRequests[1];
+        Assert.Equal(HttpMethod.Post, tagsRequest.Method);
+        Assert.Equal(
+            $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
+            tagsRequest.RequestUri.AbsolutePath);
+
+        using var tagsBody = JsonDocument.Parse(tagsRequest.Body!);
+        var tags = tagsBody.RootElement.GetProperty("tags");
+        Assert.Equal(1, tags.GetArrayLength());
+        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
+        Assert.Equal("inactive", tags[0].GetProperty("status").GetString());
     }
 
     [Fact]
@@ -211,5 +586,128 @@ public sealed class PianoWebhookFlowIntegrationTests
             Timestamp = DateTimeOffset.UtcNow.ToString("O"),
             UpdatedCustomFields = updatedCustomFields
         };
+    }
+
+    public static IEnumerable<object[]> InactivePaidAccessResponses()
+    {
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "paid-resource",
+                  "granted": "false",
+                  "start_date": "2020-01-01T00:00:00Z",
+                  "expiry_date": "2099-12-31T23:59:59Z"
+                }
+              ]
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "paid-resource",
+                  "granted": "true",
+                  "start_date": "2020-01-01T00:00:00Z",
+                  "expiry_date": "2021-01-01T00:00:00Z"
+                }
+              ]
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "paid-resource",
+                  "granted": "true",
+                  "start_date": "2099-01-01T00:00:00Z",
+                  "expiry_date": "2099-12-31T23:59:59Z"
+                }
+              ]
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "accesses": [
+                {
+                  "resource_id": "other-resource",
+                  "granted": "true",
+                  "start_date": "2020-01-01T00:00:00Z",
+                  "expiry_date": "2099-12-31T23:59:59Z"
+                }
+              ]
+            }
+            """
+        ];
+    }
+
+    private static string GetRepositoryFilePath(string fileName)
+    {
+        return Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            fileName));
+    }
+
+    private static string EncryptPianoWebhookData(string privateKey, string payload)
+    {
+        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+        var paddingLength = (16 - payloadBytes.Length % 16) % 16;
+        if (paddingLength > 0)
+        {
+            var paddedBytes = new byte[payloadBytes.Length + paddingLength];
+            payloadBytes.CopyTo(paddedBytes, 0);
+            Array.Fill(paddedBytes, (byte)paddingLength, payloadBytes.Length, paddingLength);
+            payloadBytes = paddedBytes;
+        }
+
+        using var aes = Aes.Create();
+        aes.Key = BuildCipherKey(privateKey);
+        aes.Mode = CipherMode.ECB;
+        aes.Padding = PaddingMode.None;
+
+        using var encryptor = aes.CreateEncryptor();
+        var encryptedBytes = encryptor.TransformFinalBlock(payloadBytes, 0, payloadBytes.Length);
+        var encryptedPayload = Base64UrlEncode(encryptedBytes);
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(privateKey));
+        var signature = Base64UrlEncode(hmac.ComputeHash(Encoding.UTF8.GetBytes(encryptedPayload)));
+
+        return $"{encryptedPayload}~~~{signature}";
+    }
+
+    private static byte[] BuildCipherKey(string privateKey)
+    {
+        var cipherKey = privateKey.Length > 32
+            ? privateKey[..32]
+            : privateKey.PadRight(32, 'X');
+
+        return Encoding.UTF8.GetBytes(cipherKey);
+    }
+
+    private static string Base64UrlEncode(byte[] value)
+    {
+        return Convert.ToBase64String(value)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 }

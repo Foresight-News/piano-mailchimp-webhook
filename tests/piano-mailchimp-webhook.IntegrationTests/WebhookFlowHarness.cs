@@ -23,6 +23,9 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
 
     public WebhookFlowHarness(
         PianoUserProfile? pianoUser,
+        IReadOnlyList<NewsletterFieldMapping>? fieldMappings = null,
+        string? pianoResponseBody = null,
+        string? pianoAccessResponseBody = null,
         HttpStatusCode mailchimpStatusCode = HttpStatusCode.OK,
         string mailchimpResponseBody = "{}")
     {
@@ -32,14 +35,36 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
             builder.AddProvider(_logSink);
         });
 
-        var pianoHandler = new RecordingHttpMessageHandler((_, _) =>
+        var pianoHandler = new RecordingHttpMessageHandler((request, _) =>
         {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/publisher/user/access/list", StringComparison.Ordinal) == true)
+            {
+                var accessResponseBody = pianoAccessResponseBody ??
+                    """
+                    {
+                      "accesses": [
+                        {
+                          "resource_id": "paid-resource",
+                          "granted": "true",
+                          "start_date": "2020-01-01T00:00:00Z",
+                          "expiry_date": "2099-12-31T23:59:59Z"
+                        }
+                      ]
+                    }
+                    """;
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(accessResponseBody, Encoding.UTF8, "application/json")
+                });
+            }
+
             if (pianoUser is null)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             }
 
-            var responseBody = JsonSerializer.Serialize(pianoUser, JsonOptions);
+            var responseBody = pianoResponseBody ?? JsonSerializer.Serialize(pianoUser, JsonOptions);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
@@ -78,7 +103,7 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         var newsletterPreferenceMapper = new NewsletterPreferenceMapper(
             Options.Create(new NewsletterMappingOptions
             {
-                FieldMappings =
+                FieldMappings = fieldMappings?.ToList() ??
                 [
                     new NewsletterFieldMapping
                     {
@@ -93,16 +118,29 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
                 ]
             }));
 
+        var pianoOptions = Options.Create(new PianoOptions
+        {
+            BaseUrl = "https://piano.example.test",
+            ApiToken = "test-piano-token",
+            ApplicationId = "test-application",
+            PrivateKey = "test-private-key",
+            PaidResourceIds = ["paid-resource"]
+        });
+
         var processor = new PianoWebhookProcessor(
             pianoApiClient,
             mailchimpAudienceService,
             newsletterPreferenceMapper,
+            pianoOptions,
             _loggerFactory.CreateLogger<PianoWebhookProcessor>());
+        var webhookDataParser = new PianoWebhookDataParser(
+            pianoOptions);
 
         _eventStore = new InMemoryPianoWebhookEventStore();
         _controller = new PianoWebhookController(
             _eventStore,
             processor,
+            webhookDataParser,
             _loggerFactory.CreateLogger<PianoWebhookController>());
     }
 
@@ -117,10 +155,19 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var payload = JsonSerializer.Serialize(webhookEvent, JsonOptions);
+
+        return await SendRawWebhookAsync(payload, "application/json", cancellationToken);
+    }
+
+    public async Task<IActionResult> SendRawWebhookAsync(
+        string payload,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
         var payloadBytes = Encoding.UTF8.GetBytes(payload);
 
         var httpContext = new DefaultHttpContext();
-        httpContext.Request.ContentType = "application/json";
+        httpContext.Request.ContentType = contentType;
         httpContext.Request.ContentLength = payloadBytes.Length;
         httpContext.Request.Body = new MemoryStream(payloadBytes);
 
@@ -130,6 +177,24 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         };
 
         return await _controller.Receive(cancellationToken);
+    }
+
+    public async Task<IActionResult> SendGetWebhookAsync(
+        string? data = null,
+        CancellationToken cancellationToken = default)
+    {
+        var httpContext = new DefaultHttpContext();
+        if (!string.IsNullOrWhiteSpace(data))
+        {
+            httpContext.Request.QueryString = QueryString.Create("data", data);
+        }
+
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = httpContext
+        };
+
+        return await _controller.ReceiveEncrypted(data, cancellationToken);
     }
 
     public async Task<IReadOnlyList<PianoWebhookEventRecord>> ReadStoredRecordsAsync(
