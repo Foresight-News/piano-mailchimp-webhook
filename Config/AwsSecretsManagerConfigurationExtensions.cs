@@ -3,6 +3,7 @@ using System.Text.Json;
 using Amazon;
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
+using Microsoft.Extensions.Configuration;
 
 namespace piano_mailchimp_webhook.Config;
 
@@ -25,6 +26,16 @@ public static class AwsSecretsManagerConfigurationExtensions
         }
 
         var region = builder.Configuration[$"{SectionName}:Region"];
+        builder.Configuration.AddSecretsManagerSecret(secretId, region);
+
+        return builder;
+    }
+
+    public static IConfigurationBuilder AddSecretsManagerSecret(
+        this IConfigurationBuilder configurationBuilder,
+        string secretId,
+        string? region = null)
+    {
         using var client = CreateClient(region);
         var secretValue = client.GetSecretValueAsync(new GetSecretValueRequest
         {
@@ -34,9 +45,9 @@ public static class AwsSecretsManagerConfigurationExtensions
         var secretJson = GetSecretJson(secretValue);
         var flattenedValues = FlattenSecretJson(secretJson);
 
-        builder.Configuration.AddInMemoryCollection(flattenedValues);
+        configurationBuilder.AddInMemoryCollection(flattenedValues);
 
-        return builder;
+        return configurationBuilder;
     }
 
     private static IAmazonSecretsManager CreateClient(string? region)

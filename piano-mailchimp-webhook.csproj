@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <RootNamespace>piano_mailchimp_webhook</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -9,9 +9,13 @@
 
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
+    <Compile Remove="src/**/*.cs" />
     <Content Remove="tests/**/*" />
+    <Content Remove="src/**/*" />
     <EmbeddedResource Remove="tests/**/*.resx" />
+    <EmbeddedResource Remove="src/**/*.resx" />
     <None Remove="tests/**/*" />
+    <None Remove="src/**/*" />
   </ItemGroup>
 
   <ItemGroup>
