@@ -1,5 +1,8 @@
 # piano-mailchimp-webhook
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for diagrams covering the webhook app,
+SAM scheduled reconciliation app, and subscriber identity backfill flow.
+
 ## Paid access reconciliation
 
 This repo also contains a SAM-deployable Lambda app in
