@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Nightly Mailchimp PAID tag reconciliation against Piano access.
+
+Parameters:
+  SecretId:
+    Type: String
+    Description: AWS Secrets Manager secret containing Mailchimp, Piano, and reconciliation settings.
+  SecretRegion:
+    Type: String
+    Default: eu-west-1
+  ScheduleExpression:
+    Type: String
+    Default: cron(0 2 * * ? *)
+    Description: EventBridge schedule expression in UTC.
+
+Globals:
+  Function:
+    Runtime: dotnet8
+    Architectures:
+      - arm64
+    Timeout: 900
+    MemorySize: 512
+    Environment:
+      Variables:
+        DOTNET_ENVIRONMENT: Production
+        AwsSecretsManager__SecretId: !Ref SecretId
+        AwsSecretsManager__Region: !Ref SecretRegion
+
+Resources:
+  PaidAccessReconciliationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/piano-mailchimp-paid-checker/
+      Handler: piano-mailchimp-paid-checker::piano_mailchimp_paid_checker.Function::ReconcileAsync
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${SecretRegion}:${AWS::AccountId}:secret:${SecretId}*
+      Events:
+        NightlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+            Enabled: true
+
+  SubscriberIdentityBackfillFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/piano-mailchimp-paid-checker/
+      Handler: piano-mailchimp-paid-checker::piano_mailchimp_paid_checker.Function::BackfillSubscriberIdentitiesAsync
+      Timeout: 900
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${SecretRegion}:${AWS::AccountId}:secret:${SecretId}*

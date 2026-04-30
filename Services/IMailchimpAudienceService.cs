@@ -4,8 +4,19 @@ namespace piano_mailchimp_webhook.Services;
 
 public interface IMailchimpAudienceService
 {
+    Task<MailchimpListMembersPage> ListSegmentMembersAsync(
+        string segmentId,
+        int count,
+        int offset,
+        CancellationToken cancellationToken = default);
+
     Task UpsertMemberAsync(
         MailchimpMemberUpsertRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task UpdateMemberMergeFieldsAsync(
+        string email,
+        IReadOnlyDictionary<string, object?> mergeFields,
         CancellationToken cancellationToken = default);
 
     Task AddMemberTagsAsync(

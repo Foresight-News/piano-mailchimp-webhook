@@ -12,6 +12,55 @@ public sealed class MailchimpAudienceService(
     IOptions<MailchimpOptions> options,
     ILogger<MailchimpAudienceService> logger) : IMailchimpAudienceService
 {
+    public async Task<MailchimpListMembersPage> ListSegmentMembersAsync(
+        string segmentId,
+        int count,
+        int offset,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(segmentId))
+        {
+            throw new ArgumentException("Segment ID is required.", nameof(segmentId));
+        }
+
+        if (count <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count), count, "Count must be greater than zero.");
+        }
+
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(offset), offset, "Offset cannot be negative.");
+        }
+
+        var mailchimpOptions = options.Value;
+        ConfigureClient(mailchimpOptions);
+
+        var requestUri =
+            $"lists/{mailchimpOptions.AudienceId}/segments/{Uri.EscapeDataString(segmentId)}/members?count={count}&offset={offset}";
+
+        using var response = await httpClient.GetAsync(requestUri, cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return await response.Content.ReadFromJsonAsync<MailchimpListMembersPage>(cancellationToken)
+                ?? new MailchimpListMembersPage();
+        }
+
+        var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        logger.LogError(
+            "Mailchimp segment member listing failed for segment {SegmentId}. Status: {StatusCode}. Response: {ResponseBody}",
+            segmentId,
+            (int)response.StatusCode,
+            errorBody);
+
+        throw new HttpRequestException(
+            $"Mailchimp segment member listing failed with status code {(int)response.StatusCode}.",
+            null,
+            response.StatusCode);
+    }
+
     public async Task UpsertMemberAsync(
         MailchimpMemberUpsertRequest request,
         CancellationToken cancellationToken = default)
@@ -44,6 +93,53 @@ public sealed class MailchimpAudienceService(
 
         throw new HttpRequestException(
             $"Mailchimp member upsert failed with status code {(int)response.StatusCode}.",
+            null,
+            response.StatusCode);
+    }
+
+    public async Task UpdateMemberMergeFieldsAsync(
+        string email,
+        IReadOnlyDictionary<string, object?> mergeFields,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            throw new ArgumentException("Email address is required.", nameof(email));
+        }
+
+        if (mergeFields.Count == 0)
+        {
+            return;
+        }
+
+        var mailchimpOptions = options.Value;
+        var subscriberHash = SubscriberHash.FromEmail(email);
+
+        ConfigureClient(mailchimpOptions);
+
+        var requestUri = $"lists/{mailchimpOptions.AudienceId}/members/{subscriberHash}";
+        var body = new
+        {
+            merge_fields = mergeFields
+        };
+
+        using var response = await httpClient.PatchAsJsonAsync(requestUri, body, cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        logger.LogError(
+            "Mailchimp member merge-field update failed for {EmailAddress}. Status: {StatusCode}. Response: {ResponseBody}",
+            email,
+            (int)response.StatusCode,
+            errorBody);
+
+        throw new HttpRequestException(
+            $"Mailchimp member merge-field update failed with status code {(int)response.StatusCode}.",
             null,
             response.StatusCode);
     }
