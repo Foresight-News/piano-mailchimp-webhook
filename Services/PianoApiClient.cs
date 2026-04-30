@@ -76,25 +76,11 @@ public sealed class PianoApiClient(
 
     public async Task<bool> HasActiveAccessToAnyResourceAsync(
         string uid,
-        IEnumerable<string> resourceIds,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(uid))
         {
             throw new ArgumentException("UID is required.", nameof(uid));
-        }
-
-        var paidResourceIds = resourceIds
-            .Where(resourceId => !string.IsNullOrWhiteSpace(resourceId))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (paidResourceIds.Count == 0)
-        {
-            logger.LogWarning(
-                "Skipping Piano access lookup for uid {Uid} because no paid resource IDs are configured.",
-                uid);
-
-            return false;
         }
 
         var pianoOptions = options.Value;
@@ -121,7 +107,7 @@ public sealed class PianoApiClient(
         }
 
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        return HasActiveAccessToAnyConfiguredResource(responseBody, paidResourceIds);
+        return HasActiveAccessToAnyResource(responseBody);
     }
 
     private void ConfigureClient(PianoOptions pianoOptions)
@@ -311,16 +297,13 @@ public sealed class PianoApiClient(
         };
     }
 
-    private static bool HasActiveAccessToAnyConfiguredResource(
-        string responseBody,
-        ISet<string> paidResourceIds)
+    private static bool HasActiveAccessToAnyResource(string responseBody)
     {
         using var document = JsonDocument.Parse(responseBody);
         var today = DateTimeOffset.UtcNow.Date;
 
         return EnumerateAccessRecords(document.RootElement)
             .Any(access =>
-                paidResourceIds.Contains(GetStringProperty(access, "resource_id") ?? string.Empty) &&
                 IsGranted(access) &&
                 IsTodayWithinAccessDates(access, today));
     }

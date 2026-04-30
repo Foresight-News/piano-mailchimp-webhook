@@ -469,9 +469,46 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.Equal("active", tags[0].GetProperty("status").GetString());
     }
 
+    [Fact]
+    public async Task PaidTagIsAddedWhenAnyGrantedAccessIsActiveForToday()
+    {
+        var pianoAccessResponseBody = """
+            {
+              "accesses": [
+                {
+                  "resource_id": "other-resource",
+                  "granted": "true",
+                  "start_date": "2020-01-01T00:00:00Z",
+                  "expiry_date": "2099-12-31T23:59:59Z"
+                }
+              ]
+            }
+            """;
+
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace"
+            },
+            pianoAccessResponseBody: pianoAccessResponseBody);
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+
+        using var tagsBody = JsonDocument.Parse(harness.MailchimpRequests[1].Body!);
+        var tags = tagsBody.RootElement.GetProperty("tags");
+        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
+        Assert.Equal("active", tags[0].GetProperty("status").GetString());
+    }
+
     [Theory]
     [MemberData(nameof(InactivePaidAccessResponses))]
-    public async Task PaidTagIsRemovedWhenConfiguredResourceIsNotGrantedForToday(string pianoAccessResponseBody)
+    public async Task PaidTagIsRemovedWhenNoGrantedAccessIsActiveForToday(string pianoAccessResponseBody)
     {
         await using var harness = new WebhookFlowHarness(
             new PianoUserProfile
@@ -644,9 +681,9 @@ public sealed class PianoWebhookFlowIntegrationTests
             {
               "accesses": [
                 {
-                  "resource_id": "other-resource",
+                  "resource_id": "paid-resource",
                   "granted": "true",
-                  "start_date": "2020-01-01T00:00:00Z",
+                  "start_date": null,
                   "expiry_date": "2099-12-31T23:59:59Z"
                 }
               ]

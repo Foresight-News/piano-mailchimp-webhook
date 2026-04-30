@@ -8,6 +8,5 @@ public interface IPianoApiClient
 
     Task<bool> HasActiveAccessToAnyResourceAsync(
         string uid,
-        IEnumerable<string> resourceIds,
         CancellationToken cancellationToken = default);
 }

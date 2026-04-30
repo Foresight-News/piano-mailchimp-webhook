@@ -123,15 +123,13 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
             BaseUrl = "https://piano.example.test",
             ApiToken = "test-piano-token",
             ApplicationId = "test-application",
-            PrivateKey = "test-private-key",
-            PaidResourceIds = ["paid-resource"]
+            PrivateKey = "test-private-key"
         });
 
         var processor = new PianoWebhookProcessor(
             pianoApiClient,
             mailchimpAudienceService,
             newsletterPreferenceMapper,
-            pianoOptions,
             _loggerFactory.CreateLogger<PianoWebhookProcessor>());
         var webhookDataParser = new PianoWebhookDataParser(
             pianoOptions);
