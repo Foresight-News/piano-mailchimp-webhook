@@ -8,6 +8,9 @@ public sealed class PianoWebhookProcessor(
     INewsletterPreferenceMapper newsletterPreferenceMapper,
     ILogger<PianoWebhookProcessor> logger) : IPianoWebhookProcessor
 {
+    private const string PaidTagName = "PAID";
+    private const string ExpiredTagName = "EXPIRED";
+
     private static readonly HashSet<string> SupportedEvents = new(StringComparer.OrdinalIgnoreCase)
     {
         "user_created",
@@ -88,11 +91,12 @@ public sealed class PianoWebhookProcessor(
 
         if (hasPaidAccess)
         {
-            await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
+            await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, [PaidTagName], cancellationToken);
+            await mailchimpAudienceService.RemoveMemberTagsAsync(request.EmailAddress, [ExpiredTagName], cancellationToken);
         }
         else
         {
-            await mailchimpAudienceService.RemoveMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
+            await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, [ExpiredTagName], cancellationToken);
         }
 
         logger.LogInformation(

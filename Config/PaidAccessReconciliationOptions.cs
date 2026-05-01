@@ -5,6 +5,7 @@ public sealed class PaidAccessReconciliationOptions
     public const string SectionName = "PaidAccessReconciliation";
 
     public string PaidTagName { get; init; } = "PAID";
+    public string ExpiredTagName { get; init; } = "EXPIRED";
 
     public string PaidTagSegmentId { get; init; } = string.Empty;
 

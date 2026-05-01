@@ -42,11 +42,11 @@ public sealed class PaidAccessReconciliationService(
         }
 
         logger.LogInformation(
-            "Paid access reconciliation complete. Scanned: {Scanned}. ActiveAccess: {ActiveAccess}. RemovedPaidTag: {RemovedPaidTag}. WouldRemovePaidTag: {WouldRemovePaidTag}. MissingPianoId: {MissingPianoId}. Failed: {Failed}. DryRun: {DryRun}.",
+            "Paid access reconciliation complete. Scanned: {Scanned}. ActiveAccess: {ActiveAccess}. AddedExpiredTag: {AddedExpiredTag}. WouldAddExpiredTag: {WouldAddExpiredTag}. MissingPianoId: {MissingPianoId}. Failed: {Failed}. DryRun: {DryRun}.",
             summary.Scanned,
             summary.ActiveAccess,
-            summary.RemovedPaidTag,
-            summary.WouldRemovePaidTag,
+            summary.AddedExpiredTag,
+            summary.WouldAddExpiredTag,
             summary.MissingPianoId,
             summary.Failed,
             reconciliationOptions.DryRun);
@@ -89,25 +89,34 @@ public sealed class PaidAccessReconciliationService(
             if (hasActiveAccess)
             {
                 summary.ActiveAccess++;
+
+                if (!reconciliationOptions.DryRun)
+                {
+                    await mailchimpAudienceService.RemoveMemberTagsAsync(
+                        member.EmailAddress,
+                        [reconciliationOptions.ExpiredTagName],
+                        cancellationToken);
+                }
+
                 return;
             }
 
             if (reconciliationOptions.DryRun)
             {
-                summary.WouldRemovePaidTag++;
+                summary.WouldAddExpiredTag++;
                 logger.LogInformation(
-                    "Dry run: would remove {PaidTagName} tag from {EmailAddress} for Piano uid {PianoUid}.",
-                    reconciliationOptions.PaidTagName,
+                    "Dry run: would add {ExpiredTagName} tag to {EmailAddress} for Piano uid {PianoUid}.",
+                    reconciliationOptions.ExpiredTagName,
                     member.EmailAddress,
                     pianoUid);
                 return;
             }
 
-            await mailchimpAudienceService.RemoveMemberTagsAsync(
+            await mailchimpAudienceService.AddMemberTagsAsync(
                 member.EmailAddress,
-                [reconciliationOptions.PaidTagName],
+                [reconciliationOptions.ExpiredTagName],
                 cancellationToken);
-            summary.RemovedPaidTag++;
+            summary.AddedExpiredTag++;
         }
         catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException)
         {
@@ -131,6 +140,11 @@ public sealed class PaidAccessReconciliationService(
         if (string.IsNullOrWhiteSpace(reconciliationOptions.PaidTagName))
         {
             throw new InvalidOperationException("PaidAccessReconciliation:PaidTagName is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reconciliationOptions.ExpiredTagName))
+        {
+            throw new InvalidOperationException("PaidAccessReconciliation:ExpiredTagName is required.");
         }
 
         if (reconciliationOptions.BatchSize <= 0)

@@ -6,9 +6,9 @@ public sealed class PaidAccessReconciliationSummary
 
     public int ActiveAccess { get; set; }
 
-    public int RemovedPaidTag { get; set; }
+    public int AddedExpiredTag { get; set; }
 
-    public int WouldRemovePaidTag { get; set; }
+    public int WouldAddExpiredTag { get; set; }
 
     public int MissingPianoId { get; set; }
 

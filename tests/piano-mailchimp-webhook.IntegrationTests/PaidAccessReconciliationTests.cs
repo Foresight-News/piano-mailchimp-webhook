@@ -33,6 +33,7 @@ public sealed class PaidAccessReconciliationTests
             {
                 PaidTagSegmentId = "paid-segment",
                 PaidTagName = "PAID",
+                ExpiredTagName = "EXPIRED",
                 DryRun = true
             }),
             Options.Create(new SubscriberIdentityBackfillOptions()),
@@ -42,14 +43,15 @@ public sealed class PaidAccessReconciliationTests
 
         Assert.Equal(3, summary.Scanned);
         Assert.Equal(1, summary.MissingPianoId);
-        Assert.Equal(1, summary.WouldRemovePaidTag);
-        Assert.Equal(0, summary.RemovedPaidTag);
+        Assert.Equal(1, summary.WouldAddExpiredTag);
+        Assert.Equal(0, summary.AddedExpiredTag);
         Assert.Equal(1, summary.ActiveAccess);
+        Assert.Empty(mailchimp.AddedTags);
         Assert.Empty(mailchimp.RemovedTags);
     }
 
     [Fact]
-    public async Task ReconciliationRemovesPaidTagWhenDryRunIsDisabled()
+    public async Task ReconciliationAddsExpiredTagWhenDryRunIsDisabled()
     {
         var mailchimp = new FakeMailchimpAudienceService(CreateMember("expired@example.com", "uid-expired"));
         var piano = new FakePianoApiClient(new Dictionary<string, bool>
@@ -64,6 +66,7 @@ public sealed class PaidAccessReconciliationTests
             {
                 PaidTagSegmentId = "paid-segment",
                 PaidTagName = "PAID",
+                ExpiredTagName = "EXPIRED",
                 DryRun = false
             }),
             Options.Create(new SubscriberIdentityBackfillOptions()),
@@ -71,10 +74,10 @@ public sealed class PaidAccessReconciliationTests
 
         var summary = await service.ReconcileAsync();
 
-        Assert.Equal(1, summary.RemovedPaidTag);
-        var removal = Assert.Single(mailchimp.RemovedTags);
-        Assert.Equal("expired@example.com", removal.Email);
-        Assert.Equal("PAID", Assert.Single(removal.Tags));
+        Assert.Equal(1, summary.AddedExpiredTag);
+        var addition = Assert.Single(mailchimp.AddedTags);
+        Assert.Equal("expired@example.com", addition.Email);
+        Assert.Equal("EXPIRED", Assert.Single(addition.Tags));
     }
 
     [Fact]
@@ -174,6 +177,8 @@ public sealed class PaidAccessReconciliationTests
     {
         public List<(string Email, IReadOnlyDictionary<string, object?> MergeFields)> MergeFieldUpdates { get; } = [];
 
+        public List<(string Email, IReadOnlyList<string> Tags)> AddedTags { get; } = [];
+
         public List<(string Email, IReadOnlyList<string> Tags)> RemovedTags { get; } = [];
 
         public Task<MailchimpListMembersPage> ListSegmentMembersAsync(
@@ -211,7 +216,8 @@ public sealed class PaidAccessReconciliationTests
             IEnumerable<string> tags,
             CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            AddedTags.Add((email, tags.ToList()));
+            return Task.CompletedTask;
         }
 
         public Task RemoveMemberTagsAsync(

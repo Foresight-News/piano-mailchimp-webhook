@@ -74,7 +74,7 @@ flowchart TD
     Check --> Active{Active access?}
     Active -->|yes| Keep[Keep PAID tag]
     Active -->|no| DryRun{DryRun?}
-    DryRun -->|true| WouldRemove[Log would remove PAID]
+    DryRun -->|true| WouldExpire[Log would add EXPIRED]
     DryRun -->|false| Remove[Remove PAID tag in Mailchimp]
 ```
 
