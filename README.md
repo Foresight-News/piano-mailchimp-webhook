@@ -9,8 +9,9 @@ This repo also contains a SAM-deployable Lambda app in
 `src/piano-mailchimp-paid-checker`. It has two handlers:
 
 - `ReconcileAsync`: scheduled nightly by `template.yaml`; checks Mailchimp
-  members in the configured `PAID` segment and removes the `PAID` tag only when
-  `PIANOID` exists and Piano reports no active access.
+  members in the configured `PAID` segment, adds the `EXPIRED` tag when
+  `PIANOID` exists and Piano reports no active access, and clears `EXPIRED`
+  again for active members.
 - `BackfillSubscriberIdentitiesAsync`: manual one-time handler; fills missing
   `PIANOID` merge fields from a CSV mapping of email to Piano UID.
 
@@ -49,6 +50,7 @@ Example secret shape:
   },
   "PaidAccessReconciliation": {
     "PaidTagName": "PAID",
+    "ExpiredTagName": "EXPIRED",
     "PaidTagSegmentId": "",
     "BatchSize": 100,
     "DryRun": true

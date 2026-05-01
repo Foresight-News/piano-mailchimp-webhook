@@ -7,13 +7,13 @@ flowchart LR
     Piano[Piano] -->|user_created / user_updated / custom fields webhook| WebhookApi[ASP.NET Core Webhook App]
     WebhookApi -->|store raw event + status| EventStore[(SQL Event Store)]
     WebhookApi -->|get user profile| PianoApi[Piano API]
-    WebhookApi -->|upsert member, merge fields, interests, PAID tag| Mailchimp[Mailchimp Audience]
+    WebhookApi -->|upsert member, merge fields, interests, PAID/EXPIRED tags| Mailchimp[Mailchimp Audience]
 
     EventBridge[EventBridge Schedule] -->|nightly| SamReconcile[SAM Lambda: PaidAccessReconciliationFunction]
     SamReconcile -->|load config/secrets| Secrets[AWS Secrets Manager]
     SamReconcile -->|list members in PAID saved segment| Mailchimp
     SamReconcile -->|check PIANOID active access| PianoApi
-    SamReconcile -->|remove PAID tag when access is expired and DryRun=false| Mailchimp
+    SamReconcile -->|add EXPIRED tag when access is expired and DryRun=false| Mailchimp
 
     Operator[Operator] -->|manual invoke| SamBackfill[SAM Lambda: SubscriberIdentityBackfillFunction]
     SamBackfill -->|load config + CSV mapping| Secrets
@@ -41,8 +41,9 @@ sequenceDiagram
     Webhook->>PianoApi: Check active access by uid
     alt Active access exists
         Webhook->>Mailchimp: Add PAID tag
+        Webhook->>Mailchimp: Remove EXPIRED tag
     else No active access
-        Webhook->>Mailchimp: Remove PAID tag
+        Webhook->>Mailchimp: Add EXPIRED tag
     end
     Webhook->>Store: Mark event processed
 ```
@@ -72,10 +73,10 @@ flowchart TD
     HasPianoId -->|no| Skip[Skip and log MissingPianoId]
     HasPianoId -->|yes| Check[Piano access/list by uid]
     Check --> Active{Active access?}
-    Active -->|yes| Keep[Keep PAID tag]
+    Active -->|yes| Keep[Keep PAID and clear EXPIRED]
     Active -->|no| DryRun{DryRun?}
     DryRun -->|true| WouldExpire[Log would add EXPIRED]
-    DryRun -->|false| Remove[Remove PAID tag in Mailchimp]
+    DryRun -->|false| Expire[Add EXPIRED tag in Mailchimp]
 ```
 
 ## Deployment Units
