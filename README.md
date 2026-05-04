@@ -12,7 +12,8 @@ This repo also contains a SAM-deployable Lambda app in
   members in the configured `PAID` segment and removes the `PAID` tag only when
   `PIANOID` exists and Piano reports no active access.
 - `BackfillSubscriberIdentitiesAsync`: manual one-time handler; fills missing
-  `PIANOID` merge fields from a CSV mapping of email to Piano UID.
+  `PIANOID` merge fields from either a CSV mapping of email to Piano UID or a
+  Piano user lookup by email.
 
 Recommended rollout:
 
@@ -25,12 +26,18 @@ Recommended rollout:
 7. Set `PaidAccessReconciliation:DryRun` to `false` after the dry-run output is
    acceptable.
 
-The backfill CSV must have headers containing an email column (`email`,
-`email_address`, or `mailchimp_email`) and a UID column (`uid`, `piano_uid`,
-`pianoid`, or `piano_id`). Provide it as either
-`SubscriberIdentityBackfill:MappingCsvPath` for local/manual runs or
-`SubscriberIdentityBackfill:MappingCsvContent` in the deployment secret for the
-Lambda backfill.
+By default, `SubscriberIdentityBackfill:ResolverSource` is `Csv`. The backfill
+CSV must have headers containing an email column (`email`, `email_address`, or
+`mailchimp_email`) and a UID column (`uid`, `piano_uid`, `pianoid`, or
+`piano_id`). Provide it as either `SubscriberIdentityBackfill:MappingCsvPath`
+for local/manual runs or `SubscriberIdentityBackfill:MappingCsvContent` in the
+deployment secret for the Lambda backfill.
+
+Set `SubscriberIdentityBackfill:ResolverSource` to `Piano` to resolve missing
+`PIANOID` values by searching Piano users by email. The Piano resolver only
+updates Mailchimp when Piano returns exactly one user with an exact email match;
+zero matches are counted as `NotFound`, and multiple distinct UIDs are counted
+as `Ambiguous`.
 
 Example secret shape:
 
@@ -54,6 +61,7 @@ Example secret shape:
     "DryRun": true
   },
   "SubscriberIdentityBackfill": {
+    "ResolverSource": "Csv",
     "MappingCsvPath": "",
     "MappingCsvContent": "",
     "PianoIdMergeFieldName": "PIANOID",

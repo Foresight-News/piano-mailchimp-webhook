@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "mc-subs-check"
+resolve_s3 = true
+s3_prefix = "mc-subs-check"
+region = "eu-west-1"
+profile = "fsn"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "SecretId=\"piano-mailchimp-webhook/production\" SecretRegion=\"eu-west-1\" ScheduleExpression=\"cron(0 2 * * ? *)\""
+image_repositories = []
+
+[default.global.parameters]
+region = "eu-west-1"

@@ -16,8 +16,9 @@ flowchart LR
     SamReconcile -->|remove PAID tag when access is expired and DryRun=false| Mailchimp
 
     Operator[Operator] -->|manual invoke| SamBackfill[SAM Lambda: SubscriberIdentityBackfillFunction]
-    SamBackfill -->|load config + CSV mapping| Secrets
+    SamBackfill -->|load config + optional CSV mapping| Secrets
     SamBackfill -->|list members in PAID saved segment| Mailchimp
+    SamBackfill -->|resolve missing PIANOID via CSV or Piano email search| PianoApi
     SamBackfill -->|set missing PIANOID when mapping is unique and DryRun=false| Mailchimp
 ```
 
@@ -54,7 +55,7 @@ flowchart TD
     Start([Start with PAID Mailchimp members]) --> List[List PAID saved segment]
     List --> HasPianoId{PIANOID present?}
     HasPianoId -->|yes| Already[Count as already linked]
-    HasPianoId -->|no| Resolve[Resolve email in CSV mapping]
+    HasPianoId -->|no| Resolve[Resolve email via configured resolver]
     Resolve --> Result{Mapping result}
     Result -->|not found| NotFound[Log NotFound and skip]
     Result -->|multiple UIDs| Ambiguous[Log Ambiguous and skip]

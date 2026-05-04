@@ -6,3 +6,5 @@ obj/
 Properties/PublishProfiles/
 
 publish/
+
+.aws-sam/
