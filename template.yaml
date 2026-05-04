@@ -5,6 +5,7 @@ Description: Nightly Mailchimp PAID tag reconciliation against Piano access.
 Parameters:
   SecretId:
     Type: String
+    Default: piano-mailchimp-webhook/production
     Description: AWS Secrets Manager secret containing Mailchimp, Piano, and reconciliation settings.
   SecretRegion:
     Type: String

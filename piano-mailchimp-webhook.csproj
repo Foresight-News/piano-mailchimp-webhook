@@ -23,4 +23,9 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.0" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(ExcludeAppSettingsFromPublish)' == 'true'">
+    <Content Update="appsettings*.json" CopyToPublishDirectory="Never" />
+    <None Update="appsettings*.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
 </Project>

@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../piano-mailchimp-webhook.csproj" />
+    <ProjectReference Include="../../piano-mailchimp-webhook.csproj" AdditionalProperties="TargetFramework=net8.0;ExcludeAppSettingsFromPublish=true" />
   </ItemGroup>
 
   <ItemGroup>
