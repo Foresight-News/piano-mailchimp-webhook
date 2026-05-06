@@ -19,7 +19,12 @@ public sealed class MailchimpListMember
 
     public string? GetMergeFieldString(string fieldName)
     {
-        if (!MergeFields.TryGetValue(fieldName, out var value) ||
+        if (string.IsNullOrWhiteSpace(fieldName))
+        {
+            return null;
+        }
+
+        if (!TryGetMergeFieldValue(fieldName.Trim(), out var value) ||
             value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             return null;
@@ -28,5 +33,25 @@ public sealed class MailchimpListMember
         return value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : value.GetRawText();
+    }
+
+    private bool TryGetMergeFieldValue(string fieldName, out JsonElement value)
+    {
+        if (MergeFields.TryGetValue(fieldName, out value))
+        {
+            return true;
+        }
+
+        foreach (var mergeField in MergeFields)
+        {
+            if (string.Equals(mergeField.Key, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = mergeField.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 }

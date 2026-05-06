@@ -78,6 +78,37 @@ public sealed class PaidAccessReconciliationTests
     }
 
     [Fact]
+    public async Task ReconciliationReadsPianoIdMergeFieldCaseInsensitively()
+    {
+        var mailchimp = new FakeMailchimpAudienceService(CreateMember("active@example.com", "uid-active"));
+        var piano = new FakePianoApiClient(new Dictionary<string, bool>
+        {
+            ["uid-active"] = true
+        });
+
+        var service = new PaidAccessReconciliationService(
+            mailchimp,
+            piano,
+            Options.Create(new PaidAccessReconciliationOptions
+            {
+                PaidTagSegmentId = "paid-segment",
+                PaidTagName = "PAID",
+                DryRun = true
+            }),
+            Options.Create(new SubscriberIdentityBackfillOptions
+            {
+                PianoIdMergeFieldName = "PianoId"
+            }),
+            NullLogger<PaidAccessReconciliationService>.Instance);
+
+        var summary = await service.ReconcileAsync();
+
+        Assert.Equal(1, summary.Scanned);
+        Assert.Equal(0, summary.MissingPianoId);
+        Assert.Equal(1, summary.ActiveAccess);
+    }
+
+    [Fact]
     public async Task BackfillDryRunReportsResolvableMissingPianoIdsWithoutUpdatingMailchimp()
     {
         var mailchimp = new FakeMailchimpAudienceService(
