@@ -143,6 +143,51 @@ public sealed class PaidAccessReconciliationTests
     }
 
     [Fact]
+    public async Task ReconciliationProcessesOnlyRequestedBatchAndReturnsNextOffset()
+    {
+        var mailchimp = new FakeMailchimpAudienceService(
+            CreateMember("skip@example.com", "uid-skip"),
+            CreateMember("one@example.com", "uid-one"),
+            CreateMember("two@example.com", "uid-two"),
+            CreateMember("three@example.com", "uid-three"));
+        var piano = new FakePianoApiClient(new Dictionary<string, bool>
+        {
+            ["uid-one"] = false,
+            ["uid-two"] = true,
+            ["uid-three"] = false
+        });
+
+        var service = new PaidAccessReconciliationService(
+            mailchimp,
+            piano,
+            Options.Create(new PaidAccessReconciliationOptions
+            {
+                PaidTagSegmentId = "paid-segment",
+                PaidTagName = "PAID",
+                BatchSize = 100,
+                DryRun = true
+            }),
+            Options.Create(new SubscriberIdentityBackfillOptions()),
+            NullLogger<PaidAccessReconciliationService>.Instance);
+
+        var summary = await service.ReconcileAsync(new PaidAccessReconciliationRequest
+        {
+            Offset = 1,
+            Limit = 2
+        });
+
+        Assert.Equal(1, summary.Offset);
+        Assert.Equal(2, summary.Limit);
+        Assert.Equal(4, summary.TotalItems);
+        Assert.Equal(3, summary.NextOffset);
+        Assert.True(summary.HasMore);
+        Assert.Equal(2, summary.Scanned);
+        Assert.Equal(1, summary.ActiveAccess);
+        Assert.Equal(1, summary.WouldRemovePaidTag);
+        Assert.Equal(["one@example.com", "two@example.com"], mailchimp.MemberLookups);
+    }
+
+    [Fact]
     public async Task BackfillDryRunReportsResolvableMissingPianoIdsWithoutUpdatingMailchimp()
     {
         var mailchimp = new FakeMailchimpAudienceService(

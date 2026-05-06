@@ -28,9 +28,10 @@ Recommended rollout:
 7. Set `PaidAccessReconciliation:DryRun` to `false` after the dry-run output is
    acceptable.
 
-For large PAID segments, invoke `BackfillSubscriberIdentitiesAsync` in batches
-so each Lambda run stays under the 15-minute execution limit. The optional
-payload accepts an `offset` and `limit`:
+For large PAID segments, invoke `ReconcileAsync` and
+`BackfillSubscriberIdentitiesAsync` in batches so each Lambda run stays under
+the 15-minute execution limit. Both handlers accept an optional `offset` and
+`limit`:
 
 ```json
 {
@@ -44,8 +45,20 @@ is `true`.
 
 When invoking from the AWS CLI, the Lambda function can continue running after
 the CLI's default socket read timeout expires. If you see `Read timeout on
-endpoint URL` for the Lambda `/invocations` endpoint, retry with a smaller
-batch and set the CLI read timeout to match the Lambda timeout:
+endpoint URL` for the Lambda `/invocations` endpoint, set the CLI read timeout
+to match the Lambda timeout.
+
+```bash
+aws lambda invoke \
+  --region eu-west-1 \
+  --function-name arn:aws:lambda:eu-west-1:419139139995:function:mc-subs-check-PaidAccessReconciliationFunction-ciwOZf7Qx7BT \
+  --payload '{"offset":0,"limit":100}' \
+  --cli-binary-format raw-in-base64-out \
+  --cli-read-timeout 900 \
+  response.json
+```
+
+For backfill, retry with a smaller batch if needed:
 
 ```bash
 aws lambda invoke \

@@ -12,21 +12,36 @@ public sealed class PaidAccessReconciliationService(
     ILogger<PaidAccessReconciliationService> logger) : IPaidAccessReconciliationService
 {
     public async Task<PaidAccessReconciliationSummary> ReconcileAsync(
+        PaidAccessReconciliationRequest? request = null,
         CancellationToken cancellationToken = default)
     {
         var reconciliationOptions = options.Value;
         ValidateOptions(reconciliationOptions);
 
-        var summary = new PaidAccessReconciliationSummary();
-        var offset = 0;
+        var batch = NormalizeRequest(request);
+        var summary = new PaidAccessReconciliationSummary
+        {
+            Offset = batch.Offset,
+            Limit = batch.Limit,
+            NextOffset = batch.Offset
+        };
+        var offset = batch.Offset;
 
         while (true)
         {
+            var remaining = batch.EffectiveLimit - summary.Scanned;
+            if (remaining <= 0)
+            {
+                summary.HasMore = summary.NextOffset < summary.TotalItems;
+                break;
+            }
+
             var page = await mailchimpAudienceService.ListSegmentMembersAsync(
                 reconciliationOptions.PaidTagSegmentId,
-                reconciliationOptions.BatchSize,
+                Math.Min(reconciliationOptions.BatchSize, remaining),
                 offset,
                 cancellationToken);
+            summary.TotalItems = page.TotalItems;
 
             foreach (var member in page.Members)
             {
@@ -34,15 +49,22 @@ public sealed class PaidAccessReconciliationService(
             }
 
             offset += page.Members.Count;
+            summary.NextOffset = offset;
 
             if (page.Members.Count == 0 || offset >= page.TotalItems)
             {
+                summary.HasMore = false;
                 break;
             }
         }
 
         logger.LogInformation(
-            "Paid access reconciliation complete. Scanned: {Scanned}. ActiveAccess: {ActiveAccess}. RemovedPaidTag: {RemovedPaidTag}. WouldRemovePaidTag: {WouldRemovePaidTag}. MissingPianoId: {MissingPianoId}. Failed: {Failed}. DryRun: {DryRun}.",
+            "Paid access reconciliation complete. Offset: {Offset}. Limit: {Limit}. NextOffset: {NextOffset}. TotalItems: {TotalItems}. HasMore: {HasMore}. Scanned: {Scanned}. ActiveAccess: {ActiveAccess}. RemovedPaidTag: {RemovedPaidTag}. WouldRemovePaidTag: {WouldRemovePaidTag}. MissingPianoId: {MissingPianoId}. Failed: {Failed}. DryRun: {DryRun}.",
+            summary.Offset,
+            summary.Limit,
+            summary.NextOffset,
+            summary.TotalItems,
+            summary.HasMore,
             summary.Scanned,
             summary.ActiveAccess,
             summary.RemovedPaidTag,
@@ -52,6 +74,23 @@ public sealed class PaidAccessReconciliationService(
             reconciliationOptions.DryRun);
 
         return summary;
+    }
+
+    private static (int Offset, int? Limit, int EffectiveLimit) NormalizeRequest(
+        PaidAccessReconciliationRequest? request)
+    {
+        var offset = request?.Offset ?? 0;
+        if (offset < 0)
+        {
+            throw new InvalidOperationException("Paid access reconciliation offset cannot be negative.");
+        }
+
+        if (request?.Limit <= 0)
+        {
+            throw new InvalidOperationException("Paid access reconciliation limit must be greater than zero.");
+        }
+
+        return (offset, request?.Limit, request?.Limit ?? int.MaxValue);
     }
 
     private async Task ReconcileMemberAsync(

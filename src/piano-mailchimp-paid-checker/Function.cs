@@ -1,4 +1,3 @@
-using Amazon.Lambda.CloudWatchEvents.ScheduledEvents;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.Serialization.SystemTextJson;
 using Microsoft.Extensions.Configuration;
@@ -17,16 +16,15 @@ public sealed class Function
     private static readonly Lazy<IHost> Host = new(BuildHost);
 
     public async Task<PaidAccessReconciliationSummary> ReconcileAsync(
-        ScheduledEvent scheduledEvent,
+        PaidAccessReconciliationRequest? input,
         ILambdaContext context)
     {
         using var scope = Host.Value.Services.CreateScope();
         var service = scope.ServiceProvider.GetRequiredService<IPaidAccessReconciliationService>();
 
-        context.Logger.LogInformation(
-            $"Starting paid-access reconciliation for scheduled event {scheduledEvent.Id}.");
+        context.Logger.LogInformation("Starting paid-access reconciliation.");
 
-        return await service.ReconcileAsync();
+        return await service.ReconcileAsync(input);
     }
 
     public async Task<SubscriberIdentityBackfillSummary> BackfillSubscriberIdentitiesAsync(
