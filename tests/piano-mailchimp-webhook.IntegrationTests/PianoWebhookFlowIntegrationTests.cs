@@ -508,7 +508,7 @@ public sealed class PianoWebhookFlowIntegrationTests
 
     [Theory]
     [MemberData(nameof(InactivePaidAccessResponses))]
-    public async Task PaidTagIsRemovedWhenNoGrantedAccessIsActiveForToday(string pianoAccessResponseBody)
+    public async Task ExpiredTagIsAddedWhenNoGrantedAccessIsActiveForToday(string pianoAccessResponseBody)
     {
         await using var harness = new WebhookFlowHarness(
             new PianoUserProfile
@@ -536,8 +536,8 @@ public sealed class PianoWebhookFlowIntegrationTests
         using var tagsBody = JsonDocument.Parse(tagsRequest.Body!);
         var tags = tagsBody.RootElement.GetProperty("tags");
         Assert.Equal(1, tags.GetArrayLength());
-        Assert.Equal("PAID", tags[0].GetProperty("name").GetString());
-        Assert.Equal("inactive", tags[0].GetProperty("status").GetString());
+        Assert.Equal("EXPIRED", tags[0].GetProperty("name").GetString());
+        Assert.Equal("active", tags[0].GetProperty("status").GetString());
     }
 
     [Fact]

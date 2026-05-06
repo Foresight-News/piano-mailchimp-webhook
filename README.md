@@ -42,6 +42,21 @@ payload accepts an `offset` and `limit`:
 Use the returned `NextOffset` as the next invocation's `offset` while `HasMore`
 is `true`.
 
+When invoking from the AWS CLI, the Lambda function can continue running after
+the CLI's default socket read timeout expires. If you see `Read timeout on
+endpoint URL` for the Lambda `/invocations` endpoint, retry with a smaller
+batch and set the CLI read timeout to match the Lambda timeout:
+
+```bash
+aws lambda invoke \
+  --region eu-west-1 \
+  --function-name arn:aws:lambda:eu-west-1:419139139995:function:mc-subs-check-SubscriberIdentityBackfillFunction-hlXMIZbp70hJ \
+  --payload '{"offset":0,"limit":100}' \
+  --cli-binary-format raw-in-base64-out \
+  --cli-read-timeout 900 \
+  response.json
+```
+
 By default, `SubscriberIdentityBackfill:ResolverSource` is `Piano`, which
 resolves missing `PIANOID` values by searching Piano users by email. The Piano
 resolver only updates Mailchimp when Piano returns exactly one user with an
