@@ -157,6 +157,60 @@ public sealed class PaidAccessReconciliationTests
         Assert.Equal("uid-missing", update.MergeFields["PIANOID"]);
     }
 
+    [Fact]
+    public async Task PianoResolverMapsExactEmailMatchesAndFlagsAmbiguousMatches()
+    {
+        var piano = new FakePianoApiClient(
+            new Dictionary<string, bool>(),
+            new Dictionary<string, IReadOnlyList<PianoUserProfile>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["found@example.com"] =
+                [
+                    new PianoUserProfile
+                    {
+                        Email = "found@example.com",
+                        Uid = "uid-found"
+                    }
+                ],
+                ["ambiguous@example.com"] =
+                [
+                    new PianoUserProfile
+                    {
+                        Email = "ambiguous@example.com",
+                        Uid = "uid-one"
+                    },
+                    new PianoUserProfile
+                    {
+                        Email = "ambiguous@example.com",
+                        Uid = "uid-two"
+                    }
+                ],
+                ["fuzzy@example.com"] =
+                [
+                    new PianoUserProfile
+                    {
+                        Email = "other@example.com",
+                        Uid = "uid-other"
+                    }
+                ]
+            });
+
+        var resolver = new PianoSubscriberIdentityResolver(
+            piano,
+            NullLogger<PianoSubscriberIdentityResolver>.Instance);
+
+        var found = await resolver.ResolveAsync(" FOUND@example.com ");
+        var ambiguous = await resolver.ResolveAsync("ambiguous@example.com");
+        var notFound = await resolver.ResolveAsync("missing@example.com");
+        var fuzzy = await resolver.ResolveAsync("fuzzy@example.com");
+
+        Assert.Equal(SubscriberIdentityResolutionStatus.Found, found.Status);
+        Assert.Equal("uid-found", found.PianoUid);
+        Assert.Equal(SubscriberIdentityResolutionStatus.Ambiguous, ambiguous.Status);
+        Assert.Equal(SubscriberIdentityResolutionStatus.NotFound, notFound.Status);
+        Assert.Equal(SubscriberIdentityResolutionStatus.NotFound, fuzzy.Status);
+    }
+
     private static MailchimpListMember CreateMember(string email, string pianoUid)
     {
         return new MailchimpListMember
@@ -224,7 +278,9 @@ public sealed class PaidAccessReconciliationTests
         }
     }
 
-    private sealed class FakePianoApiClient(IReadOnlyDictionary<string, bool> activeAccessByUid)
+    private sealed class FakePianoApiClient(
+        IReadOnlyDictionary<string, bool> activeAccessByUid,
+        IReadOnlyDictionary<string, IReadOnlyList<PianoUserProfile>>? usersByEmail = null)
         : IPianoApiClient
     {
         public Task<PianoUserProfile?> GetUserAsync(
@@ -232,6 +288,16 @@ public sealed class PaidAccessReconciliationTests
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyList<PianoUserProfile>> SearchUsersByEmailAsync(
+            string email,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(
+                usersByEmail is not null && usersByEmail.TryGetValue(email.Trim(), out var users)
+                    ? users
+                    : []);
         }
 
         public Task<bool> HasActiveAccessToAnyResourceAsync(

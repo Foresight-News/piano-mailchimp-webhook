@@ -52,7 +52,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPianoWebhookEventStore, PianoWebhookEventStore>();
         services.AddSingleton<INewsletterPreferenceMapper, NewsletterPreferenceMapper>();
         services.AddSingleton<IPianoWebhookDataParser, PianoWebhookDataParser>();
-        services.AddSingleton<ISubscriberIdentityResolver, CsvSubscriberIdentityResolver>();
+        services.AddSingleton<CsvSubscriberIdentityResolver>();
+        services.AddSingleton<PianoSubscriberIdentityResolver>();
+        services.AddSingleton<ISubscriberIdentityResolver, ConfiguredSubscriberIdentityResolver>();
         services.AddScoped<IPianoWebhookProcessor, PianoWebhookProcessor>();
         services.AddScoped<IPianoWebhookService, PianoWebhookService>();
         services.AddScoped<IPaidAccessReconciliationService, PaidAccessReconciliationService>();

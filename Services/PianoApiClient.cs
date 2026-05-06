@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using piano_mailchimp_webhook.Config;
@@ -72,6 +73,56 @@ public sealed class PianoApiClient(
             responseBody);
 
         throw new JsonException("Piano user response could not be deserialized.");
+    }
+
+    public async Task<IReadOnlyList<PianoUserProfile>> SearchUsersByEmailAsync(
+        string email,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            throw new ArgumentException("Email is required.", nameof(email));
+        }
+
+        var pianoOptions = options.Value;
+        ConfigureClient(pianoOptions);
+
+        var requestUri = "api/v3/publisher/user/search";
+        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["aid"] = pianoOptions.ApplicationId,
+                ["email"] = email.Trim(),
+                ["offset"] = "0",
+                ["limit"] = "10"
+            })
+        };
+
+        request.Headers.TryAddWithoutValidation("api_token", pianoOptions.ApiToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            logger.LogError(
+                "Piano user email search failed for {EmailAddress}. Status: {StatusCode}. RequestUri: {RequestUri}. Response: {ResponseBody}",
+                email,
+                (int)response.StatusCode,
+                requestUri,
+                errorBody);
+
+            throw new HttpRequestException(
+                $"Piano user email search failed with status code {(int)response.StatusCode}.",
+                null,
+                response.StatusCode);
+        }
+
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        return DeserializeUserProfiles(responseBody);
     }
 
     public async Task<bool> HasActiveAccessToAnyResourceAsync(
@@ -166,6 +217,46 @@ public sealed class PianoApiClient(
         }
 
         return DeserializeUserProfileElement(document.RootElement);
+    }
+
+    private static IReadOnlyList<PianoUserProfile> DeserializeUserProfiles(string responseBody)
+    {
+        using var document = JsonDocument.Parse(responseBody);
+        var users = EnumerateUserProfileElements(document.RootElement)
+            .Select(DeserializeUserProfileElement)
+            .Where(user => user is not null)
+            .Select(user => user!)
+            .ToList();
+
+        return users;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateUserProfileElements(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            return root.EnumerateArray();
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        foreach (var propertyName in new[] { "users", "user", "data", "items", "results" })
+        {
+            if (root.TryGetProperty(propertyName, out var value))
+            {
+                return value.ValueKind switch
+                {
+                    JsonValueKind.Array => value.EnumerateArray(),
+                    JsonValueKind.Object => [value],
+                    _ => []
+                };
+            }
+        }
+
+        return [root];
     }
 
     private static PianoUserProfile? DeserializeUserProfileElement(JsonElement element)
