@@ -14,6 +14,10 @@ Parameters:
     Type: String
     Default: cron(0 2 * * ? *)
     Description: EventBridge schedule expression in UTC.
+  PaidTagSegmentId:
+    Type: String
+    Default: '7232611'
+    Description: Mailchimp saved segment ID for contacts tagged PAID.
 
 Globals:
   Function:
@@ -27,6 +31,7 @@ Globals:
         DOTNET_ENVIRONMENT: Production
         AwsSecretsManager__SecretId: !Ref SecretId
         AwsSecretsManager__Region: !Ref SecretRegion
+        PaidAccessReconciliation__PaidTagSegmentId: !Ref PaidTagSegmentId
 
 Resources:
   PaidAccessReconciliationFunction:

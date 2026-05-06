@@ -18,7 +18,9 @@ This repo also contains a SAM-deployable Lambda app in
 Recommended rollout:
 
 1. Configure a Mailchimp saved segment for contacts tagged `PAID`.
-2. Configure `PaidAccessReconciliation:PaidTagSegmentId`.
+2. Configure `PaidAccessReconciliation:PaidTagSegmentId`. For SAM deploys,
+   this can be supplied with the `PaidTagSegmentId` parameter, which maps to
+   `PaidAccessReconciliation__PaidTagSegmentId` on the Lambda.
 3. Run the backfill with `SubscriberIdentityBackfill:DryRun` set to `true`.
 4. Review the summary for `NotFound` and `Ambiguous` rows.
 5. Run the backfill with `SubscriberIdentityBackfill:DryRun` set to `false`.
@@ -56,7 +58,7 @@ Example secret shape:
   },
   "PaidAccessReconciliation": {
     "PaidTagName": "PAID",
-    "PaidTagSegmentId": "",
+    "PaidTagSegmentId": "7232611",
     "BatchSize": 100,
     "DryRun": true
   },
