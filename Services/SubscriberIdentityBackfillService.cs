@@ -12,22 +12,37 @@ public sealed class SubscriberIdentityBackfillService(
     ILogger<SubscriberIdentityBackfillService> logger) : ISubscriberIdentityBackfillService
 {
     public async Task<SubscriberIdentityBackfillSummary> BackfillAsync(
+        SubscriberIdentityBackfillRequest? request = null,
         CancellationToken cancellationToken = default)
     {
         var paidOptions = reconciliationOptions.Value;
         var identityOptions = backfillOptions.Value;
         ValidateOptions(paidOptions, identityOptions);
 
-        var summary = new SubscriberIdentityBackfillSummary();
-        var offset = 0;
+        var batch = NormalizeRequest(request);
+        var summary = new SubscriberIdentityBackfillSummary
+        {
+            Offset = batch.Offset,
+            Limit = batch.Limit,
+            NextOffset = batch.Offset
+        };
+        var offset = batch.Offset;
 
         while (true)
         {
+            var remaining = batch.EffectiveLimit - summary.Scanned;
+            if (remaining <= 0)
+            {
+                summary.HasMore = summary.NextOffset < summary.TotalItems;
+                break;
+            }
+
             var page = await mailchimpAudienceService.ListSegmentMembersAsync(
                 paidOptions.PaidTagSegmentId,
-                paidOptions.BatchSize,
+                Math.Min(paidOptions.BatchSize, remaining),
                 offset,
                 cancellationToken);
+            summary.TotalItems = page.TotalItems;
 
             foreach (var member in page.Members)
             {
@@ -35,15 +50,22 @@ public sealed class SubscriberIdentityBackfillService(
             }
 
             offset += page.Members.Count;
+            summary.NextOffset = offset;
 
             if (page.Members.Count == 0 || offset >= page.TotalItems)
             {
+                summary.HasMore = false;
                 break;
             }
         }
 
         logger.LogInformation(
-            "Subscriber identity backfill complete. Scanned: {Scanned}. AlreadyHadPianoId: {AlreadyHadPianoId}. Updated: {Updated}. WouldUpdate: {WouldUpdate}. NotFound: {NotFound}. Ambiguous: {Ambiguous}. Failed: {Failed}. DryRun: {DryRun}.",
+            "Subscriber identity backfill complete. Offset: {Offset}. Limit: {Limit}. NextOffset: {NextOffset}. TotalItems: {TotalItems}. HasMore: {HasMore}. Scanned: {Scanned}. AlreadyHadPianoId: {AlreadyHadPianoId}. Updated: {Updated}. WouldUpdate: {WouldUpdate}. NotFound: {NotFound}. Ambiguous: {Ambiguous}. Failed: {Failed}. DryRun: {DryRun}.",
+            summary.Offset,
+            summary.Limit,
+            summary.NextOffset,
+            summary.TotalItems,
+            summary.HasMore,
             summary.Scanned,
             summary.AlreadyHadPianoId,
             summary.Updated,
@@ -54,6 +76,23 @@ public sealed class SubscriberIdentityBackfillService(
             identityOptions.DryRun);
 
         return summary;
+    }
+
+    private static (int Offset, int? Limit, int EffectiveLimit) NormalizeRequest(
+        SubscriberIdentityBackfillRequest? request)
+    {
+        var offset = request?.Offset ?? 0;
+        if (offset < 0)
+        {
+            throw new InvalidOperationException("Subscriber identity backfill offset cannot be negative.");
+        }
+
+        if (request?.Limit <= 0)
+        {
+            throw new InvalidOperationException("Subscriber identity backfill limit must be greater than zero.");
+        }
+
+        return (offset, request?.Limit, request?.Limit ?? int.MaxValue);
     }
 
     private async Task BackfillMemberAsync(

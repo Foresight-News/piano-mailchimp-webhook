@@ -28,6 +28,20 @@ Recommended rollout:
 7. Set `PaidAccessReconciliation:DryRun` to `false` after the dry-run output is
    acceptable.
 
+For large PAID segments, invoke `BackfillSubscriberIdentitiesAsync` in batches
+so each Lambda run stays under the 15-minute execution limit. The optional
+payload accepts an `offset` and `limit`:
+
+```json
+{
+  "offset": 0,
+  "limit": 250
+}
+```
+
+Use the returned `NextOffset` as the next invocation's `offset` while `HasMore`
+is `true`.
+
 By default, `SubscriberIdentityBackfill:ResolverSource` is `Piano`, which
 resolves missing `PIANOID` values by searching Piano users by email. The Piano
 resolver only updates Mailchimp when Piano returns exactly one user with an

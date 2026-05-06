@@ -156,6 +156,62 @@ public sealed class PaidAccessReconciliationTests
     }
 
     [Fact]
+    public async Task BackfillProcessesOnlyRequestedBatchAndReturnsNextOffset()
+    {
+        var mailchimp = new FakeMailchimpAudienceService(
+            new MailchimpListMember
+            {
+                EmailAddress = "skip@example.com"
+            },
+            new MailchimpListMember
+            {
+                EmailAddress = "one@example.com"
+            },
+            new MailchimpListMember
+            {
+                EmailAddress = "two@example.com"
+            },
+            new MailchimpListMember
+            {
+                EmailAddress = "three@example.com"
+            });
+        var resolver = new FakeSubscriberIdentityResolver(new Dictionary<string, SubscriberIdentityResolution>
+        {
+            ["one@example.com"] = SubscriberIdentityResolution.Found("uid-one"),
+            ["two@example.com"] = SubscriberIdentityResolution.Found("uid-two"),
+            ["three@example.com"] = SubscriberIdentityResolution.Found("uid-three")
+        });
+
+        var service = new SubscriberIdentityBackfillService(
+            mailchimp,
+            resolver,
+            Options.Create(new PaidAccessReconciliationOptions
+            {
+                PaidTagSegmentId = "paid-segment",
+                BatchSize = 100
+            }),
+            Options.Create(new SubscriberIdentityBackfillOptions
+            {
+                DryRun = true
+            }),
+            NullLogger<SubscriberIdentityBackfillService>.Instance);
+
+        var summary = await service.BackfillAsync(new SubscriberIdentityBackfillRequest
+        {
+            Offset = 1,
+            Limit = 2
+        });
+
+        Assert.Equal(1, summary.Offset);
+        Assert.Equal(2, summary.Limit);
+        Assert.Equal(4, summary.TotalItems);
+        Assert.Equal(3, summary.NextOffset);
+        Assert.True(summary.HasMore);
+        Assert.Equal(2, summary.Scanned);
+        Assert.Equal(2, summary.WouldUpdate);
+    }
+
+    [Fact]
     public async Task BackfillUpdatesPianoIdWhenDryRunIsDisabled()
     {
         var mailchimp = new FakeMailchimpAudienceService(new MailchimpListMember

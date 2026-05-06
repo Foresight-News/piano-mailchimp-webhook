@@ -30,7 +30,7 @@ public sealed class Function
     }
 
     public async Task<SubscriberIdentityBackfillSummary> BackfillSubscriberIdentitiesAsync(
-        object input,
+        SubscriberIdentityBackfillRequest? input,
         ILambdaContext context)
     {
         using var scope = Host.Value.Services.CreateScope();
@@ -38,7 +38,7 @@ public sealed class Function
 
         context.Logger.LogInformation("Starting subscriber identity backfill.");
 
-        return await service.BackfillAsync();
+        return await service.BackfillAsync(input);
     }
 
     private static IHost BuildHost()
