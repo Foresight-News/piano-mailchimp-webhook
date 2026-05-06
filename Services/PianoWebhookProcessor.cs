@@ -92,7 +92,7 @@ public sealed class PianoWebhookProcessor(
         }
         else
         {
-            await mailchimpAudienceService.RemoveMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
+            //await mailchimpAudienceService.RemoveMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
         }
 
         logger.LogInformation(
