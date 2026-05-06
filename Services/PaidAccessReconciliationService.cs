@@ -69,19 +69,23 @@ public sealed class PaidAccessReconciliationService(
             return;
         }
 
-        var pianoUid = member.GetMergeFieldString(backfillOptions.Value.PianoIdMergeFieldName);
-        if (string.IsNullOrWhiteSpace(pianoUid))
-        {
-            summary.MissingPianoId++;
-            logger.LogWarning(
-                "Skipping paid-access check for {EmailAddress} because {PianoIdMergeFieldName} is missing.",
-                member.EmailAddress,
-                backfillOptions.Value.PianoIdMergeFieldName);
-            return;
-        }
-
         try
         {
+            var fullMember = await mailchimpAudienceService.GetMemberAsync(
+                member.EmailAddress,
+                cancellationToken);
+
+            var pianoUid = fullMember.GetMergeFieldString(backfillOptions.Value.PianoIdMergeFieldName);
+            if (string.IsNullOrWhiteSpace(pianoUid))
+            {
+                summary.MissingPianoId++;
+                logger.LogWarning(
+                    "Skipping paid-access check for {EmailAddress} because {PianoIdMergeFieldName} is missing.",
+                    member.EmailAddress,
+                    backfillOptions.Value.PianoIdMergeFieldName);
+                return;
+            }
+
             var hasActiveAccess = await pianoApiClient.HasActiveAccessToAnyResourceAsync(
                 pianoUid.Trim(),
                 cancellationToken);
@@ -114,9 +118,8 @@ public sealed class PaidAccessReconciliationService(
             summary.Failed++;
             logger.LogError(
                 exception,
-                "Paid-access check failed for {EmailAddress} and Piano uid {PianoUid}.",
-                member.EmailAddress,
-                pianoUid);
+                "Paid-access check failed for {EmailAddress}.",
+                member.EmailAddress);
         }
     }
 

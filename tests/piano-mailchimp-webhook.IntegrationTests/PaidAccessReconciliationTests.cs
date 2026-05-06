@@ -109,6 +109,40 @@ public sealed class PaidAccessReconciliationTests
     }
 
     [Fact]
+    public async Task ReconciliationLoadsFullMemberBeforeReadingPianoId()
+    {
+        var segmentMember = new MailchimpListMember
+        {
+            EmailAddress = "active@example.com"
+        };
+        var mailchimp = new FakeMailchimpAudienceService(segmentMember);
+        mailchimp.FullMembersByEmail["active@example.com"] = CreateMember("active@example.com", "uid-active");
+        var piano = new FakePianoApiClient(new Dictionary<string, bool>
+        {
+            ["uid-active"] = true
+        });
+
+        var service = new PaidAccessReconciliationService(
+            mailchimp,
+            piano,
+            Options.Create(new PaidAccessReconciliationOptions
+            {
+                PaidTagSegmentId = "paid-segment",
+                PaidTagName = "PAID",
+                DryRun = true
+            }),
+            Options.Create(new SubscriberIdentityBackfillOptions()),
+            NullLogger<PaidAccessReconciliationService>.Instance);
+
+        var summary = await service.ReconcileAsync();
+
+        Assert.Equal(1, summary.Scanned);
+        Assert.Equal(0, summary.MissingPianoId);
+        Assert.Equal(1, summary.ActiveAccess);
+        Assert.Equal("active@example.com", Assert.Single(mailchimp.MemberLookups));
+    }
+
+    [Fact]
     public async Task BackfillDryRunReportsResolvableMissingPianoIdsWithoutUpdatingMailchimp()
     {
         var mailchimp = new FakeMailchimpAudienceService(
@@ -317,6 +351,11 @@ public sealed class PaidAccessReconciliationTests
 
         public List<(string Email, IReadOnlyList<string> Tags)> RemovedTags { get; } = [];
 
+        public List<string> MemberLookups { get; } = [];
+
+        public Dictionary<string, MailchimpListMember> FullMembersByEmail { get; } =
+            members.ToDictionary(member => member.EmailAddress, StringComparer.OrdinalIgnoreCase);
+
         public Task<MailchimpListMembersPage> ListSegmentMembersAsync(
             string segmentId,
             int count,
@@ -329,6 +368,14 @@ public sealed class PaidAccessReconciliationTests
                 Members = pageMembers,
                 TotalItems = members.Length
             });
+        }
+
+        public Task<MailchimpListMember> GetMemberAsync(
+            string email,
+            CancellationToken cancellationToken = default)
+        {
+            MemberLookups.Add(email);
+            return Task.FromResult(FullMembersByEmail[email]);
         }
 
         public Task UpsertMemberAsync(

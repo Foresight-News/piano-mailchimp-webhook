@@ -97,6 +97,43 @@ public sealed class MailchimpAudienceService(
             response.StatusCode);
     }
 
+    public async Task<MailchimpListMember> GetMemberAsync(
+        string email,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            throw new ArgumentException("Email address is required.", nameof(email));
+        }
+
+        var mailchimpOptions = options.Value;
+        var subscriberHash = SubscriberHash.FromEmail(email);
+
+        ConfigureClient(mailchimpOptions);
+
+        var requestUri = $"lists/{mailchimpOptions.AudienceId}/members/{subscriberHash}";
+        using var response = await httpClient.GetAsync(requestUri, cancellationToken);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return await response.Content.ReadFromJsonAsync<MailchimpListMember>(cancellationToken)
+                ?? new MailchimpListMember();
+        }
+
+        var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        logger.LogError(
+            "Mailchimp member lookup failed for {EmailAddress}. Status: {StatusCode}. Response: {ResponseBody}",
+            email,
+            (int)response.StatusCode,
+            errorBody);
+
+        throw new HttpRequestException(
+            $"Mailchimp member lookup failed with status code {(int)response.StatusCode}.",
+            null,
+            response.StatusCode);
+    }
+
     public async Task UpdateMemberMergeFieldsAsync(
         string email,
         IReadOnlyDictionary<string, object?> mergeFields,

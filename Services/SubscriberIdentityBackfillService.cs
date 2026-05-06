@@ -111,7 +111,24 @@ public sealed class SubscriberIdentityBackfillService(
             return;
         }
 
-        var existingPianoUid = member.GetMergeFieldString(identityOptions.PianoIdMergeFieldName);
+        MailchimpListMember fullMember;
+        try
+        {
+            fullMember = await mailchimpAudienceService.GetMemberAsync(
+                member.EmailAddress,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException)
+        {
+            summary.Failed++;
+            logger.LogError(
+                exception,
+                "Subscriber identity backfill failed to load full Mailchimp member for {EmailAddress}.",
+                member.EmailAddress);
+            return;
+        }
+
+        var existingPianoUid = fullMember.GetMergeFieldString(identityOptions.PianoIdMergeFieldName);
         if (!string.IsNullOrWhiteSpace(existingPianoUid))
         {
             summary.AlreadyHadPianoId++;

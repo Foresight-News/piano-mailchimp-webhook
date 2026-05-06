@@ -10,6 +10,10 @@ public interface IMailchimpAudienceService
         int offset,
         CancellationToken cancellationToken = default);
 
+    Task<MailchimpListMember> GetMemberAsync(
+        string email,
+        CancellationToken cancellationToken = default);
+
     Task UpsertMemberAsync(
         MailchimpMemberUpsertRequest request,
         CancellationToken cancellationToken = default);
