@@ -10,12 +10,16 @@
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
     <Compile Remove="src/**/*.cs" />
+    <Compile Remove="obj/**/*.cs" />
     <Content Remove="tests/**/*" />
     <Content Remove="src/**/*" />
+    <Content Remove="obj/**/*" />
     <EmbeddedResource Remove="tests/**/*.resx" />
     <EmbeddedResource Remove="src/**/*.resx" />
+    <EmbeddedResource Remove="obj/**/*.resx" />
     <None Remove="tests/**/*" />
     <None Remove="src/**/*" />
+    <None Remove="obj/**/*" />
   </ItemGroup>
 
   <ItemGroup>

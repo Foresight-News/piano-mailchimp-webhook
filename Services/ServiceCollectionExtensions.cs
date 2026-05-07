@@ -17,10 +17,6 @@ public static class ServiceCollectionExtensions
             .BindConfiguration(NewsletterMappingOptions.SectionName);
         services.AddOptions<PianoOptions>()
             .BindConfiguration(PianoOptions.SectionName);
-        services.AddOptions<PaidAccessReconciliationOptions>()
-            .BindConfiguration(PaidAccessReconciliationOptions.SectionName);
-        services.AddOptions<SubscriberIdentityBackfillOptions>()
-            .BindConfiguration(SubscriberIdentityBackfillOptions.SectionName);
 
         services.AddHttpClient<IMailchimpAudienceService, MailchimpAudienceService>((serviceProvider, httpClient) =>
         {
@@ -52,13 +48,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPianoWebhookEventStore, PianoWebhookEventStore>();
         services.AddSingleton<INewsletterPreferenceMapper, NewsletterPreferenceMapper>();
         services.AddSingleton<IPianoWebhookDataParser, PianoWebhookDataParser>();
-        services.AddSingleton<CsvSubscriberIdentityResolver>();
-        services.AddSingleton<PianoSubscriberIdentityResolver>();
-        services.AddSingleton<ISubscriberIdentityResolver, ConfiguredSubscriberIdentityResolver>();
         services.AddScoped<IPianoWebhookProcessor, PianoWebhookProcessor>();
         services.AddScoped<IPianoWebhookService, PianoWebhookService>();
-        services.AddScoped<IPaidAccessReconciliationService, PaidAccessReconciliationService>();
-        services.AddScoped<ISubscriberIdentityBackfillService, SubscriberIdentityBackfillService>();
 
         return services;
     }
