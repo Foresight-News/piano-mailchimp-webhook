@@ -51,6 +51,9 @@ public sealed class SubscriberIdentityBackfillService(
 
             offset += page.Members.Count;
             summary.NextOffset = offset;
+            summary.HasMore = page.Members.Count > 0 && offset < summary.TotalItems;
+
+            LogBatchSummary(summary, identityOptions.DryRun);
 
             if (page.Members.Count == 0 || offset >= page.TotalItems)
             {
@@ -59,6 +62,32 @@ public sealed class SubscriberIdentityBackfillService(
             }
         }
 
+        LogFinalSummary(summary, identityOptions.DryRun);
+
+        return summary;
+    }
+
+    private void LogBatchSummary(SubscriberIdentityBackfillSummary summary, bool dryRun)
+    {
+        logger.LogInformation(
+            "Subscriber identity backfill batch complete. Offset: {Offset}. Limit: {Limit}. NextOffset: {NextOffset}. TotalItems: {TotalItems}. HasMore: {HasMore}. Scanned: {Scanned}. AlreadyHadPianoId: {AlreadyHadPianoId}. Updated: {Updated}. WouldUpdate: {WouldUpdate}. NotFound: {NotFound}. Ambiguous: {Ambiguous}. Failed: {Failed}. DryRun: {DryRun}.",
+            summary.Offset,
+            summary.Limit,
+            summary.NextOffset,
+            summary.TotalItems,
+            summary.HasMore,
+            summary.Scanned,
+            summary.AlreadyHadPianoId,
+            summary.Updated,
+            summary.WouldUpdate,
+            summary.NotFound,
+            summary.Ambiguous,
+            summary.Failed,
+            dryRun);
+    }
+
+    private void LogFinalSummary(SubscriberIdentityBackfillSummary summary, bool dryRun)
+    {
         logger.LogInformation(
             "Subscriber identity backfill complete. Offset: {Offset}. Limit: {Limit}. NextOffset: {NextOffset}. TotalItems: {TotalItems}. HasMore: {HasMore}. Scanned: {Scanned}. AlreadyHadPianoId: {AlreadyHadPianoId}. Updated: {Updated}. WouldUpdate: {WouldUpdate}. NotFound: {NotFound}. Ambiguous: {Ambiguous}. Failed: {Failed}. DryRun: {DryRun}.",
             summary.Offset,
@@ -73,9 +102,7 @@ public sealed class SubscriberIdentityBackfillService(
             summary.NotFound,
             summary.Ambiguous,
             summary.Failed,
-            identityOptions.DryRun);
-
-        return summary;
+            dryRun);
     }
 
     private static (int Offset, int? Limit, int EffectiveLimit) NormalizeRequest(
