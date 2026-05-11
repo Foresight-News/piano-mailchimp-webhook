@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import time
 from urllib.parse import quote, unquote_plus
 
 
@@ -16,6 +17,8 @@ MAILCHIMP_TAG_NAME = "PAID"
 DEFAULT_BATCH_SIZE = 10
 DEFAULT_MAILCHIMP_CONNECT_TIMEOUT_SECONDS = 2.0
 DEFAULT_MAILCHIMP_READ_TIMEOUT_SECONDS = 5.0
+DEFAULT_MAILCHIMP_MAX_RETRIES = 3
+DEFAULT_MAILCHIMP_RETRY_DELAY_SECONDS = 1.0
 
 
 def lambda_handler(event, context):
@@ -113,6 +116,14 @@ def build_mailchimp_client():
         "MAILCHIMP_READ_TIMEOUT_SECONDS",
         DEFAULT_MAILCHIMP_READ_TIMEOUT_SECONDS,
     )
+    max_retries = _read_non_negative_int_env(
+        "MAILCHIMP_MAX_RETRIES",
+        DEFAULT_MAILCHIMP_MAX_RETRIES,
+    )
+    retry_delay = _read_positive_float_env(
+        "MAILCHIMP_RETRY_DELAY_SECONDS",
+        DEFAULT_MAILCHIMP_RETRY_DELAY_SECONDS,
+    )
 
     return MailchimpClient(
         http=urllib3.PoolManager(),
@@ -128,6 +139,8 @@ def build_mailchimp_client():
             "Mailchimp:AudienceId",
         ),
         request_timeout=urllib3.Timeout(connect=connect_timeout, read=read_timeout),
+        max_retries=max_retries,
+        retry_delay_seconds=retry_delay,
     )
 
 
@@ -216,12 +229,25 @@ def chunk_rows(rows, batch_size):
 
 
 class MailchimpClient:
-    def __init__(self, http, api_key, server_prefix, audience_id, request_timeout=None):
+    def __init__(
+        self,
+        http,
+        api_key,
+        server_prefix,
+        audience_id,
+        request_timeout=None,
+        max_retries=DEFAULT_MAILCHIMP_MAX_RETRIES,
+        retry_delay_seconds=DEFAULT_MAILCHIMP_RETRY_DELAY_SECONDS,
+        retry_sleep=time.sleep,
+    ):
         self.http = http
         self.api_key = api_key
         self.server_prefix = server_prefix
         self.audience_id = audience_id
         self.request_timeout = request_timeout
+        self.max_retries = max_retries
+        self.retry_delay_seconds = retry_delay_seconds
+        self.retry_sleep = retry_sleep
         self.base_url = f"https://{server_prefix}.api.mailchimp.com/3.0"
         self.headers = {
             "Authorization": _build_basic_auth_header(api_key),
@@ -259,19 +285,37 @@ class MailchimpClient:
         return f"{self.base_url}/lists/{list_id}/members/{subscriber_hash}"
 
     def _request_json(self, method, url, body):
-        response = self.http.request(
-            method,
-            url,
-            body=json.dumps(body).encode("utf-8"),
-            headers=self.headers,
-            timeout=self.request_timeout,
-        )
+        encoded_body = json.dumps(body).encode("utf-8")
 
-        if response.status < 200 or response.status >= 300:
-            response_body = response.data.decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Mailchimp request failed with status {response.status}: {response_body}"
+        for attempt in range(self.max_retries + 1):
+            response = self.http.request(
+                method,
+                url,
+                body=encoded_body,
+                headers=self.headers,
+                timeout=self.request_timeout,
             )
+
+            if 200 <= response.status < 300:
+                return
+
+            response_body = response.data.decode("utf-8", errors="replace")
+            if response.status != 429 or attempt >= self.max_retries:
+                raise RuntimeError(
+                    f"Mailchimp request failed with status {response.status}: {response_body}"
+                )
+
+            delay_seconds = _get_retry_delay_seconds(
+                response,
+                self.retry_delay_seconds * (2**attempt),
+            )
+            LOGGER.warning(
+                "Mailchimp returned 429. Retrying request in %.2f seconds. attempt=%s max_retries=%s",
+                delay_seconds,
+                attempt + 1,
+                self.max_retries,
+            )
+            self.retry_sleep(delay_seconds)
 
 
 def build_subscriber_hash(email):
@@ -319,6 +363,18 @@ def _read_positive_int_env(name, default):
     return value
 
 
+def _read_non_negative_int_env(name, default):
+    raw_value = os.environ.get(name)
+    if raw_value is None or raw_value == "":
+        return default
+
+    value = int(raw_value)
+    if value < 0:
+        raise RuntimeError(f"{name} must be greater than or equal to zero.")
+
+    return value
+
+
 def _read_positive_float_env(name, default):
     raw_value = os.environ.get(name)
     if raw_value is None or raw_value == "":
@@ -347,3 +403,14 @@ def _get_dict(config, key):
 def _build_basic_auth_header(api_key):
     credentials = base64.b64encode(f"anystring:{api_key}".encode("ascii")).decode("ascii")
     return f"Basic {credentials}"
+
+
+def _get_retry_delay_seconds(response, fallback):
+    retry_after = getattr(response, "headers", {}).get("Retry-After")
+    if retry_after is None:
+        return fallback
+
+    try:
+        return max(float(retry_after), 0.0)
+    except ValueError:
+        return fallback

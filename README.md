@@ -56,6 +56,9 @@ current Piano subscribers to CSV in S3 and sync those CSV rows to Mailchimp.
 - Sync trigger: S3 `ObjectCreated` for `piano/subscribers/*.csv`
 - Sync batching: the S3-triggered function splits CSV rows into SQS messages of
   10 subscribers, and a worker Lambda syncs one queued batch at a time.
+- Mailchimp worker concurrency: the worker Lambda and SQS event source are
+  capped at 2 concurrent invocations so SQS cannot fan out enough Mailchimp sync
+  batches to exceed Mailchimp's simultaneous connection limit.
 
 The functions read Piano, Mailchimp, and export settings from AWS Secrets
 Manager secret `piano-mailchimp-webhook/production`. The template grants the
@@ -89,6 +92,8 @@ Expected secret fields:
 The Mailchimp worker uses explicit HTTP timeouts so slow API calls fail and
 retry through SQS instead of running until the Lambda hard timeout. The default
 timeouts are 2 seconds to connect and 5 seconds to read a response.
+Mailchimp `429 Too Many Requests` responses are retried in-process up to 3 times
+with exponential backoff before the SQS message is allowed to fail and retry.
 
 Example deploy:
 

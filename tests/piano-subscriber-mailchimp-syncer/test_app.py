@@ -232,6 +232,55 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
         )
         self.assertEqual({"tags": [{"name": "PAID", "status": "active"}]}, body)
 
+    def test_mailchimp_client_retries_429_response(self):
+        http = FakeHttp([FakeResponse(429), FakeResponse(200)])
+        sleep_calls = []
+        client = app.MailchimpClient(
+            http=http,
+            api_key="api-key",
+            server_prefix="us1",
+            audience_id="audience-id",
+            retry_sleep=sleep_calls.append,
+        )
+
+        client.upsert_member("ada@example.com", "Ada", "Lovelace")
+
+        self.assertEqual(2, len(http.requests))
+        self.assertEqual([1.0], sleep_calls)
+
+    def test_mailchimp_client_uses_retry_after_header_for_429_response(self):
+        http = FakeHttp(
+            [FakeResponse(429, headers={"Retry-After": "2.5"}), FakeResponse(200)]
+        )
+        sleep_calls = []
+        client = app.MailchimpClient(
+            http=http,
+            api_key="api-key",
+            server_prefix="us1",
+            audience_id="audience-id",
+            retry_sleep=sleep_calls.append,
+        )
+
+        client.upsert_member("ada@example.com", "Ada", "Lovelace")
+
+        self.assertEqual([2.5], sleep_calls)
+
+    def test_mailchimp_client_raises_after_429_retries_are_exhausted(self):
+        http = FakeHttp([FakeResponse(429), FakeResponse(429)])
+        client = app.MailchimpClient(
+            http=http,
+            api_key="api-key",
+            server_prefix="us1",
+            audience_id="audience-id",
+            max_retries=1,
+            retry_sleep=lambda _: None,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Mailchimp request failed with status 429"):
+            client.upsert_member("ada@example.com", "Ada", "Lovelace")
+
+        self.assertEqual(2, len(http.requests))
+
 
 class FakeMailchimpClient:
     def __init__(self):
@@ -245,8 +294,9 @@ class FakeMailchimpClient:
 
 
 class FakeHttp:
-    def __init__(self):
+    def __init__(self, responses=None):
         self.requests = []
+        self.responses = list(responses or [FakeResponse(200)])
 
     def request(self, method, url, body, headers, timeout=None):
         self.requests.append(
@@ -258,7 +308,10 @@ class FakeHttp:
                 "timeout": timeout,
             }
         )
-        return FakeResponse(200)
+        if len(self.responses) > 1:
+            return self.responses.pop(0)
+
+        return self.responses[0]
 
 
 class FakeS3:
@@ -293,8 +346,9 @@ class FakeSqs:
 
 
 class FakeResponse:
-    def __init__(self, status):
+    def __init__(self, status, headers=None):
         self.status = status
+        self.headers = headers or {}
         self.data = b"{}"
 
 

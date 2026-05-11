@@ -96,16 +96,21 @@ Resources:
     Properties:
       CodeUri: src/piano-subscriber-mailchimp-syncer/
       Handler: app.worker_handler
+      ReservedConcurrentExecutions: 2
       Environment:
         Variables:
           MAILCHIMP_CONNECT_TIMEOUT_SECONDS: 2
           MAILCHIMP_READ_TIMEOUT_SECONDS: 5
+          MAILCHIMP_MAX_RETRIES: 3
+          MAILCHIMP_RETRY_DELAY_SECONDS: 1
       Events:
         SubscriberSyncBatchQueued:
           Type: SQS
           Properties:
             Queue: !GetAtt SubscriberMailchimpSyncQueue.Arn
             BatchSize: 1
+            ScalingConfig:
+              MaximumConcurrency: 2
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt SubscriberMailchimpSyncQueue.QueueName
