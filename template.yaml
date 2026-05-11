@@ -3,28 +3,14 @@ Transform: AWS::Serverless-2016-10-31
 Description: Export Piano subscribers to CSV in S3.
 
 Parameters:
-  PianoApiToken:
+  SecretId:
     Type: String
-    NoEcho: true
-    Description: Piano publisher API token used by the subscriber export Lambda.
-  PianoAid:
+    Default: piano-mailchimp-webhook/production
+    Description: AWS Secrets Manager secret containing Piano and export settings.
+  SecretRegion:
     Type: String
-    Default: 28C3eb1vpu
-    Description: Piano application ID.
-  PianoSource:
-    Type: String
-    Default: VX
-    Description: Piano publisher user search source.
-  PageLimit:
-    Type: Number
-    Default: 1000
-    MinValue: 1
-    Description: Number of users to request from Piano per page.
-  MaxPages:
-    Type: Number
-    Default: 100
-    MinValue: 1
-    Description: Safety limit for offset-based pagination.
+    Default: eu-west-1
+    Description: AWS region where the Secrets Manager secret is stored.
 
 Globals:
   Function:
@@ -36,11 +22,8 @@ Globals:
     Environment:
       Variables:
         S3_BUCKET: !Ref SubscriberExportBucket
-        PIANO_API_TOKEN: !Ref PianoApiToken
-        PIANO_AID: !Ref PianoAid
-        PIANO_SOURCE: !Ref PianoSource
-        PAGE_LIMIT: !Ref PageLimit
-        MAX_PAGES: !Ref MaxPages
+        SECRET_ID: !Ref SecretId
+        SECRET_REGION: !Ref SecretRegion
 
 Resources:
   SubscriberExportBucket:
@@ -56,6 +39,8 @@ Resources:
       Policies:
         - S3WritePolicy:
             BucketName: !Ref SubscriberExportBucket
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${SecretRegion}:${AWS::AccountId}:secret:${SecretId}*
 
 Outputs:
   SubscriberExportBucketName:

@@ -17,17 +17,40 @@ DEFAULT_PIANO_AID = "28C3eb1vpu"
 DEFAULT_PIANO_SOURCE = "VX"
 DEFAULT_PAGE_LIMIT = 1000
 DEFAULT_MAX_PAGES = 100
+DEFAULT_SECRET_ID = "piano-mailchimp-webhook/production"
+EXPORT_CONFIG_SECTION = "PianoSubscriberExport"
 
 
 def lambda_handler(event, context):
     import boto3
 
-    page_limit = _read_positive_int("PAGE_LIMIT", DEFAULT_PAGE_LIMIT)
-    max_pages = _read_positive_int("MAX_PAGES", DEFAULT_MAX_PAGES)
     bucket_name = _read_required_env("S3_BUCKET")
-    api_token = _read_required_env("PIANO_API_TOKEN")
-    aid = os.environ.get("PIANO_AID", DEFAULT_PIANO_AID)
-    source = os.environ.get("PIANO_SOURCE", DEFAULT_PIANO_SOURCE)
+    secret_id = os.environ.get("SECRET_ID", DEFAULT_SECRET_ID)
+    secret_region = os.environ.get("SECRET_REGION") or os.environ.get("AWS_REGION")
+
+    secrets_manager = boto3.client(
+        "secretsmanager",
+        region_name=secret_region,
+    )
+    config = load_secret_config(secrets_manager, secret_id)
+    export_config = _get_dict(config, EXPORT_CONFIG_SECTION)
+    piano_config = _get_dict(config, "Piano")
+
+    page_limit = _read_positive_int_config(
+        export_config,
+        "PageLimit",
+        "PAGE_LIMIT",
+        DEFAULT_PAGE_LIMIT,
+    )
+    max_pages = _read_positive_int_config(
+        export_config,
+        "MaxPages",
+        "MAX_PAGES",
+        DEFAULT_MAX_PAGES,
+    )
+    api_token = _read_required_config(piano_config, "ApiToken", "Piano:ApiToken")
+    aid = _read_config_value(piano_config, "ApplicationId", DEFAULT_PIANO_AID)
+    source = _read_config_value(export_config, "Source", DEFAULT_PIANO_SOURCE)
 
     http = urllib3.PoolManager()
     users = fetch_all_users(
@@ -56,6 +79,20 @@ def lambda_handler(event, context):
         "key": key,
         "row_count": row_count,
     }
+
+
+def load_secret_config(secrets_manager, secret_id):
+    response = secrets_manager.get_secret_value(SecretId=secret_id)
+    secret_string = response.get("SecretString")
+
+    if not secret_string:
+        raise RuntimeError(f"{secret_id} did not contain a SecretString value.")
+
+    config = json.loads(secret_string)
+    if not isinstance(config, dict):
+        raise RuntimeError(f"{secret_id} SecretString must be a JSON object.")
+
+    return config
 
 
 def fetch_all_users(http, api_token, aid, source, page_limit, max_pages):
@@ -186,13 +223,36 @@ def _read_required_env(name):
     return value
 
 
-def _read_positive_int(name, default):
-    raw_value = os.environ.get(name)
+def _read_positive_int_config(config, key, env_name, default):
+    raw_value = config.get(key)
+    if raw_value is None or raw_value == "":
+        raw_value = os.environ.get(env_name)
     if raw_value is None or raw_value == "":
         return default
 
     value = int(raw_value)
     if value <= 0:
-        raise RuntimeError(f"{name} must be greater than zero.")
+        raise RuntimeError(f"{EXPORT_CONFIG_SECTION}:{key} must be greater than zero.")
 
     return value
+
+
+def _read_required_config(config, key, description):
+    value = _read_config_value(config, key)
+    if not value:
+        raise RuntimeError(f"{description} is required in Secrets Manager config.")
+
+    return value
+
+
+def _read_config_value(config, key, default=None):
+    value = config.get(key)
+    if value is None or value == "":
+        return default
+
+    return str(value).strip()
+
+
+def _get_dict(config, key):
+    value = config.get(key)
+    return value if isinstance(value, dict) else {}

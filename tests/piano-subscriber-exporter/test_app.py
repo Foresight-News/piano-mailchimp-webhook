@@ -14,6 +14,21 @@ import app
 
 
 class PianoSubscriberExporterTests(unittest.TestCase):
+    def test_load_secret_config_reads_json_secret_string(self):
+        config = app.load_secret_config(
+            FakeSecretsManager(
+                {
+                    "Piano": {
+                        "ApiToken": "token",
+                        "ApplicationId": "aid",
+                    }
+                }
+            ),
+            "piano-mailchimp-webhook/production",
+        )
+
+        self.assertEqual("token", config["Piano"]["ApiToken"])
+
     def test_fetch_all_users_uses_offset_pagination_until_short_page(self):
         http = FakeHttp(
             [
@@ -108,6 +123,16 @@ class FakeResponse:
     def __init__(self, status, payload):
         self.status = status
         self.data = json.dumps(payload).encode("utf-8")
+
+
+class FakeSecretsManager:
+    def __init__(self, payload):
+        self.payload = payload
+        self.secret_ids = []
+
+    def get_secret_value(self, SecretId):
+        self.secret_ids.append(SecretId)
+        return {"SecretString": json.dumps(self.payload)}
 
 
 if __name__ == "__main__":

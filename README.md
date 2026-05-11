@@ -52,15 +52,34 @@ exports current Piano subscribers to CSV in S3.
 - Bucket created by CloudFormation: `fn-lambda`
 - Output key pattern: `piano/subscribers/subscribers-YYYYMMDD-HHMMSS.csv`
 
-The Piano API token is supplied through the `PianoApiToken` CloudFormation
-parameter and exposed to the function as `PIANO_API_TOKEN`; it is not stored in
-source. `PAGE_LIMIT` defaults to `1000`, and `MAX_PAGES` defaults to `100`.
+The function reads Piano credentials and export settings from AWS Secrets
+Manager secret `piano-mailchimp-webhook/production`. The template grants the
+Lambda read access to that secret and does not expose the Piano API token as a
+CloudFormation parameter.
+
+Expected secret fields:
+
+```json
+{
+  "Piano": {
+    "ApiToken": "",
+    "ApplicationId": "28C3eb1vpu"
+  },
+  "PianoSubscriberExport": {
+    "Source": "VX",
+    "PageLimit": 1000,
+    "MaxPages": 100
+  }
+}
+```
+
+`PianoSubscriberExport` is optional. `PageLimit` defaults to `1000`, and
+`MaxPages` defaults to `100`.
 
 Example deploy:
 
 ```bash
-sam deploy --guided \
-  --parameter-overrides PianoApiToken="$PIANO_API_TOKEN"
+sam deploy --guided
 ```
 
 Example manual invoke after deploy:
