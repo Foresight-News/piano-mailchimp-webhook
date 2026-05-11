@@ -20,7 +20,7 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
         )
 
     def test_sync_subscriber_csv_upserts_rows_and_skips_missing_email(self):
-        client = FakeMailchimpClient()
+        client = FakeMailchimpClient(existing_members={"ada@example.com"})
 
         result = app.sync_subscriber_csv(
             "\ufeffindex,first_name,last_name,email\n"
@@ -30,11 +30,21 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
             client,
         )
 
-        self.assertEqual({"processed_rows": 2, "skipped_rows": 1}, result)
+        self.assertEqual(
+            {
+                "processed_rows": 2,
+                "updated_rows": 1,
+                "new_rows": 1,
+                "skipped_rows": 1,
+            },
+            result,
+        )
         self.assertEqual(
             [
+                ("exists", "ada@example.com"),
                 ("upsert", "ada@example.com", "Ada", "Lovelace"),
                 ("tag", "ada@example.com"),
+                ("exists", "grace@example.com"),
                 ("upsert", "grace@example.com", "Grace", "Hopper"),
                 ("tag", "grace@example.com"),
             ],
@@ -74,7 +84,7 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
         self.assertEqual([2, 2, 1], [len(batch) for batch in batches])
 
     def test_worker_handler_syncs_sqs_message_batches(self):
-        client = FakeMailchimpClient()
+        client = FakeMailchimpClient(existing_members={"ada@example.com"})
         original_build_mailchimp_client = app.build_mailchimp_client
         app.build_mailchimp_client = lambda: client
         try:
@@ -109,11 +119,21 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
         finally:
             app.build_mailchimp_client = original_build_mailchimp_client
 
-        self.assertEqual({"processed_rows": 2, "skipped_rows": 0}, result)
+        self.assertEqual(
+            {
+                "processed_rows": 2,
+                "updated_rows": 1,
+                "new_rows": 1,
+                "skipped_rows": 0,
+            },
+            result,
+        )
         self.assertEqual(
             [
+                ("exists", "ada@example.com"),
                 ("upsert", "ada@example.com", "Ada", "Lovelace"),
                 ("tag", "ada@example.com"),
+                ("exists", "grace@example.com"),
                 ("upsert", "grace@example.com", "Grace", "Hopper"),
                 ("tag", "grace@example.com"),
             ],
@@ -232,6 +252,20 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
         )
         self.assertEqual({"tags": [{"name": "PAID", "status": "active"}]}, body)
 
+    def test_mailchimp_client_checks_whether_member_exists(self):
+        http = FakeHttp([FakeResponse(200), FakeResponse(404)])
+        client = app.MailchimpClient(
+            http=http,
+            api_key="api-key",
+            server_prefix="us1",
+            audience_id="audience-id",
+        )
+
+        self.assertTrue(client.member_exists("ada@example.com"))
+        self.assertFalse(client.member_exists("grace@example.com"))
+
+        self.assertEqual(["GET", "GET"], [request["method"] for request in http.requests])
+
     def test_mailchimp_client_retries_429_response(self):
         http = FakeHttp([FakeResponse(429), FakeResponse(200)])
         sleep_calls = []
@@ -283,8 +317,13 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
 
 
 class FakeMailchimpClient:
-    def __init__(self):
+    def __init__(self, existing_members=None):
         self.calls = []
+        self.existing_members = set(existing_members or [])
+
+    def member_exists(self, email):
+        self.calls.append(("exists", email))
+        return email in self.existing_members
 
     def upsert_member(self, email, first_name, last_name):
         self.calls.append(("upsert", email, first_name, last_name))

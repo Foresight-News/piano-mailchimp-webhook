@@ -73,6 +73,8 @@ def lambda_handler(event, context):
 def worker_handler(event, context):
     mailchimp_client = build_mailchimp_client()
     processed_rows = 0
+    updated_rows = 0
+    new_rows = 0
     skipped_rows = 0
 
     for record in event.get("Records", []):
@@ -80,19 +82,33 @@ def worker_handler(event, context):
         rows = message.get("rows", [])
         result = sync_subscriber_rows(rows, mailchimp_client)
         processed_rows += result["processed_rows"]
+        updated_rows += result["updated_rows"]
+        new_rows += result["new_rows"]
         skipped_rows += result["skipped_rows"]
 
         LOGGER.info(
-            "Synced Mailchimp batch. bucket=%s key=%s batch_number=%s processed_rows=%s skipped_rows=%s",
+            "Synced Mailchimp batch. bucket=%s key=%s batch_number=%s processed_rows=%s updated_rows=%s new_rows=%s skipped_rows=%s",
             message.get("bucket"),
             message.get("key"),
             message.get("batch_number"),
             result["processed_rows"],
+            result["updated_rows"],
+            result["new_rows"],
             result["skipped_rows"],
         )
 
+    LOGGER.info(
+        "Mailchimp sync summary. processed_rows=%s updated_rows=%s new_rows=%s skipped_rows=%s",
+        processed_rows,
+        updated_rows,
+        new_rows,
+        skipped_rows,
+    )
+
     return {
         "processed_rows": processed_rows,
+        "updated_rows": updated_rows,
+        "new_rows": new_rows,
         "skipped_rows": skipped_rows,
     }
 
@@ -172,6 +188,8 @@ def sync_subscriber_csv(csv_body, mailchimp_client):
 
 def sync_subscriber_rows(rows, mailchimp_client, start_row_number=1):
     processed_rows = 0
+    updated_rows = 0
+    new_rows = 0
     skipped_rows = 0
 
     for row_number, row in enumerate(rows, start=start_row_number):
@@ -184,6 +202,7 @@ def sync_subscriber_rows(rows, mailchimp_client, start_row_number=1):
         first_name = _get_row_text(row, "first_name")
         last_name = _get_row_text(row, "last_name")
 
+        is_existing_member = mailchimp_client.member_exists(email)
         mailchimp_client.upsert_member(
             email=email,
             first_name=first_name,
@@ -191,9 +210,15 @@ def sync_subscriber_rows(rows, mailchimp_client, start_row_number=1):
         )
         mailchimp_client.ensure_paid_tag(email)
         processed_rows += 1
+        if is_existing_member:
+            updated_rows += 1
+        else:
+            new_rows += 1
 
     return {
         "processed_rows": processed_rows,
+        "updated_rows": updated_rows,
+        "new_rows": new_rows,
         "skipped_rows": skipped_rows,
     }
 
@@ -267,6 +292,15 @@ class MailchimpClient:
         url = self._member_url(subscriber_hash)
         self._request_json("PUT", url, body)
 
+    def member_exists(self, email):
+        subscriber_hash = build_subscriber_hash(email)
+        response = self._request_json(
+            "GET",
+            self._member_url(subscriber_hash),
+            allow_statuses={404},
+        )
+        return response.status != 404
+
     def ensure_paid_tag(self, email):
         subscriber_hash = build_subscriber_hash(email)
         body = {
@@ -284,8 +318,9 @@ class MailchimpClient:
         list_id = quote(self.audience_id, safe="")
         return f"{self.base_url}/lists/{list_id}/members/{subscriber_hash}"
 
-    def _request_json(self, method, url, body):
-        encoded_body = json.dumps(body).encode("utf-8")
+    def _request_json(self, method, url, body=None, allow_statuses=None):
+        encoded_body = None if body is None else json.dumps(body).encode("utf-8")
+        allow_statuses = allow_statuses or set()
 
         for attempt in range(self.max_retries + 1):
             response = self.http.request(
@@ -296,8 +331,8 @@ class MailchimpClient:
                 timeout=self.request_timeout,
             )
 
-            if 200 <= response.status < 300:
-                return
+            if 200 <= response.status < 300 or response.status in allow_statuses:
+                return response
 
             response_body = response.data.decode("utf-8", errors="replace")
             if response.status != 429 or attempt >= self.max_retries:
