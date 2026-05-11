@@ -49,7 +49,7 @@ exports current Piano subscribers to CSV in S3.
 
 - Template: `template.yaml`
 - Function code: `src/piano-subscriber-exporter/app.py`
-- Bucket created by CloudFormation: `fn-lambda`
+- Bucket created by CloudFormation: see stack output `SubscriberExportBucketName`
 - Output key pattern: `piano/subscribers/subscribers-YYYYMMDD-HHMMSS.csv`
 
 The function reads Piano credentials and export settings from AWS Secrets

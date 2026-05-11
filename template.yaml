@@ -28,8 +28,6 @@ Globals:
 Resources:
   SubscriberExportBucket:
     Type: AWS::S3::Bucket
-    Properties:
-      BucketName: fn-lambda
 
   PianoSubscriberExportFunction:
     Type: AWS::Serverless::Function
