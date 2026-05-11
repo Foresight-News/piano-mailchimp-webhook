@@ -164,7 +164,7 @@ def build_mailchimp_client():
     )
 
     return MailchimpClient(
-        http=urllib3.PoolManager(),
+        http=urllib3.PoolManager(retries=False),
         api_key=_read_required_config(mailchimp_config, "ApiKey", "Mailchimp:ApiKey"),
         server_prefix=_read_required_config(
             mailchimp_config,
@@ -179,6 +179,7 @@ def build_mailchimp_client():
         request_timeout=urllib3.Timeout(connect=connect_timeout, read=read_timeout),
         max_retries=max_retries,
         retry_delay_seconds=retry_delay,
+        request_exception_types=(urllib3.exceptions.HTTPError,),
     )
 
 
@@ -356,6 +357,7 @@ class MailchimpClient:
         max_retries=DEFAULT_MAILCHIMP_MAX_RETRIES,
         retry_delay_seconds=DEFAULT_MAILCHIMP_RETRY_DELAY_SECONDS,
         retry_sleep=time.sleep,
+        request_exception_types=(),
     ):
         self.http = http
         self.api_key = api_key
@@ -365,6 +367,7 @@ class MailchimpClient:
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
         self.retry_sleep = retry_sleep
+        self.request_exception_types = request_exception_types
         self.base_url = f"https://{server_prefix}.api.mailchimp.com/3.0"
         self.headers = {
             "Authorization": _build_basic_auth_header(api_key),
@@ -477,13 +480,30 @@ class MailchimpClient:
         allow_statuses = allow_statuses or set()
 
         for attempt in range(self.max_retries + 1):
-            response = self.http.request(
-                method,
-                url,
-                body=encoded_body,
-                headers=self.headers,
-                timeout=self.request_timeout,
-            )
+            try:
+                response = self.http.request(
+                    method,
+                    url,
+                    body=encoded_body,
+                    headers=self.headers,
+                    timeout=self.request_timeout,
+                )
+            except self.request_exception_types as error:
+                if attempt >= self.max_retries:
+                    raise RuntimeError(
+                        f"Mailchimp request failed after {attempt + 1} attempts: {error}"
+                    ) from error
+
+                delay_seconds = self.retry_delay_seconds * (2**attempt)
+                LOGGER.warning(
+                    "Mailchimp request failed. Retrying request in %.2f seconds. attempt=%s max_retries=%s error=%s",
+                    delay_seconds,
+                    attempt + 1,
+                    self.max_retries,
+                    error,
+                )
+                self.retry_sleep(delay_seconds)
+                continue
 
             if 200 <= response.status < 300 or response.status in allow_statuses:
                 return response

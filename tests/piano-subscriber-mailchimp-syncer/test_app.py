@@ -579,6 +579,48 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
 
         self.assertEqual(2, len(http.requests))
 
+    def test_mailchimp_client_retries_request_exceptions(self):
+        http = FakeHttp([FakeMailchimpTimeout("read timed out"), FakeResponse(200)])
+        sleep_calls = []
+        client = app.MailchimpClient(
+            http=http,
+            api_key="api-key",
+            server_prefix="us1",
+            audience_id="audience-id",
+            retry_sleep=sleep_calls.append,
+            request_exception_types=(FakeMailchimpTimeout,),
+        )
+
+        client.upsert_member("ada@example.com", "Ada", "Lovelace")
+
+        self.assertEqual(2, len(http.requests))
+        self.assertEqual([1.0], sleep_calls)
+
+    def test_mailchimp_client_raises_after_request_exception_retries_are_exhausted(self):
+        http = FakeHttp(
+            [
+                FakeMailchimpTimeout("first timeout"),
+                FakeMailchimpTimeout("second timeout"),
+            ]
+        )
+        client = app.MailchimpClient(
+            http=http,
+            api_key="api-key",
+            server_prefix="us1",
+            audience_id="audience-id",
+            max_retries=1,
+            retry_sleep=lambda _: None,
+            request_exception_types=(FakeMailchimpTimeout,),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mailchimp request failed after 2 attempts: second timeout",
+        ):
+            client.upsert_member("ada@example.com", "Ada", "Lovelace")
+
+        self.assertEqual(2, len(http.requests))
+
 
 class FakeMailchimpClient:
     def __init__(
@@ -633,9 +675,18 @@ class FakeHttp:
             }
         )
         if len(self.responses) > 1:
-            return self.responses.pop(0)
+            response = self.responses.pop(0)
+        else:
+            response = self.responses[0]
 
-        return self.responses[0]
+        if isinstance(response, BaseException):
+            raise response
+
+        return response
+
+
+class FakeMailchimpTimeout(Exception):
+    pass
 
 
 class FakeS3:

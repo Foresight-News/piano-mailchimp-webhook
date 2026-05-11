@@ -89,11 +89,11 @@ Expected secret fields:
 `PianoSubscriberExport` is optional. `PageLimit` defaults to `1000`, and
 `MaxPages` defaults to `100`.
 
-The Mailchimp worker uses explicit HTTP timeouts so slow API calls fail and
-retry through SQS instead of running until the Lambda hard timeout. The default
-timeouts are 2 seconds to connect and 5 seconds to read a response.
-Mailchimp `429 Too Many Requests` responses are retried in-process up to 3 times
-with exponential backoff before the SQS message is allowed to fail and retry.
+The Mailchimp worker uses explicit HTTP timeouts so slow API calls fail instead
+of running until the Lambda hard timeout. The default timeouts are 2 seconds to
+connect and 5 seconds to read a response. Mailchimp transport failures and
+`429 Too Many Requests` responses are retried in-process up to 3 times with
+exponential backoff before the SQS message is allowed to fail and retry.
 
 Example deploy:
 
