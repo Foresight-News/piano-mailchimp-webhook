@@ -43,6 +43,16 @@ def lambda_handler(event, context):
         rows, result = build_subscriber_batches(csv_body)
         skipped_rows += result["skipped_rows"]
 
+        if mailchimp_client is None:
+            mailchimp_client = build_mailchimp_client()
+
+        reconciliation_result = reconcile_expired_paid_subscribers(
+            build_email_set(rows),
+            mailchimp_client,
+        )
+        reconciliation_results.append(reconciliation_result)
+
+        record_queued_batches = 0
         for batch_number, batch in enumerate(chunk_rows(rows, batch_size), start=1):
             sqs.send_message(
                 QueueUrl=queue_url,
@@ -55,22 +65,15 @@ def lambda_handler(event, context):
                     }
                 ),
             )
+            record_queued_batches += 1
             queued_batches += 1
             queued_rows += len(batch)
 
-        if mailchimp_client is None:
-            mailchimp_client = build_mailchimp_client()
-
-        reconciliation_result = reconcile_expired_paid_subscribers(
-            build_email_set(rows),
-            mailchimp_client,
-        )
-        reconciliation_results.append(reconciliation_result)
-
         LOGGER.info(
-            "Queued s3://%s/%s for Mailchimp sync. queued_rows=%s skipped_rows=%s batch_size=%s",
+            "Queued s3://%s/%s for Mailchimp sync. queued_batches=%s queued_rows=%s skipped_rows=%s batch_size=%s",
             bucket_name,
             key,
+            record_queued_batches,
             len(rows),
             result["skipped_rows"],
             batch_size,

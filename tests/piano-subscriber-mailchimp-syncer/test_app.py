@@ -229,6 +229,111 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
         )
         self.assertIn(("expired", "expired@example.com"), client.calls)
 
+    def test_lambda_handler_reconciles_before_queueing_csv_batches(self):
+        s3 = FakeS3(
+            "\ufeffindex,first_name,last_name,email\n"
+            "1,Ada,Lovelace,ada@example.com\n"
+            "2,Grace,Hopper,grace@example.com\n"
+        )
+        sqs = FakeSqs()
+        original_boto3 = sys.modules.get("boto3")
+        sys.modules["boto3"] = types.SimpleNamespace(
+            client=lambda name, **_: {"s3": s3, "sqs": sqs}[name]
+        )
+        original_queue_url = os.environ.get("SYNC_QUEUE_URL")
+        original_batch_size = os.environ.get("SYNC_BATCH_SIZE")
+        os.environ["SYNC_QUEUE_URL"] = "https://sqs.example.test/queue"
+        os.environ["SYNC_BATCH_SIZE"] = "1"
+        client = FakeMailchimpClient()
+        original_build_mailchimp_client = app.build_mailchimp_client
+        app.build_mailchimp_client = lambda: client
+
+        try:
+            app.lambda_handler(
+                {
+                    "Records": [
+                        {
+                            "s3": {
+                                "bucket": {"name": "bucket-name"},
+                                "object": {
+                                    "key": "piano/subscribers/subscribers.csv",
+                                },
+                            }
+                        }
+                    ]
+                },
+                None,
+            )
+        finally:
+            if original_boto3 is None:
+                del sys.modules["boto3"]
+            else:
+                sys.modules["boto3"] = original_boto3
+
+            if original_queue_url is None:
+                os.environ.pop("SYNC_QUEUE_URL", None)
+            else:
+                os.environ["SYNC_QUEUE_URL"] = original_queue_url
+
+            if original_batch_size is None:
+                os.environ.pop("SYNC_BATCH_SIZE", None)
+            else:
+                os.environ["SYNC_BATCH_SIZE"] = original_batch_size
+
+            app.build_mailchimp_client = original_build_mailchimp_client
+
+        self.assertEqual(("list_tagged", "PAID"), client.calls[0])
+        self.assertEqual(2, len(sqs.messages))
+
+    def test_lambda_handler_does_not_queue_batches_when_reconciliation_fails(self):
+        s3 = FakeS3(
+            "\ufeffindex,first_name,last_name,email\n"
+            "1,Ada,Lovelace,ada@example.com\n"
+            "2,Grace,Hopper,grace@example.com\n"
+        )
+        sqs = FakeSqs()
+        original_boto3 = sys.modules.get("boto3")
+        sys.modules["boto3"] = types.SimpleNamespace(
+            client=lambda name, **_: {"s3": s3, "sqs": sqs}[name]
+        )
+        original_queue_url = os.environ.get("SYNC_QUEUE_URL")
+        os.environ["SYNC_QUEUE_URL"] = "https://sqs.example.test/queue"
+        client = FakeMailchimpClient(fail_list_tagged=True)
+        original_build_mailchimp_client = app.build_mailchimp_client
+        app.build_mailchimp_client = lambda: client
+
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Mailchimp list failed"):
+                app.lambda_handler(
+                    {
+                        "Records": [
+                            {
+                                "s3": {
+                                    "bucket": {"name": "bucket-name"},
+                                    "object": {
+                                        "key": "piano/subscribers/subscribers.csv",
+                                    },
+                                }
+                            }
+                        ]
+                    },
+                    None,
+                )
+        finally:
+            if original_boto3 is None:
+                del sys.modules["boto3"]
+            else:
+                sys.modules["boto3"] = original_boto3
+
+            if original_queue_url is None:
+                os.environ.pop("SYNC_QUEUE_URL", None)
+            else:
+                os.environ["SYNC_QUEUE_URL"] = original_queue_url
+
+            app.build_mailchimp_client = original_build_mailchimp_client
+
+        self.assertEqual([], sqs.messages)
+
     def test_sync_subscriber_rows_continues_after_mailchimp_row_failure(self):
         client = FakeMailchimpClient(failing_emails={"ada@example.com"})
 
@@ -476,11 +581,18 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
 
 
 class FakeMailchimpClient:
-    def __init__(self, existing_members=None, paid_members=None, failing_emails=None):
+    def __init__(
+        self,
+        existing_members=None,
+        paid_members=None,
+        failing_emails=None,
+        fail_list_tagged=False,
+    ):
         self.calls = []
         self.existing_members = set(existing_members or [])
         self.paid_members = list(paid_members or [])
         self.failing_emails = set(failing_emails or [])
+        self.fail_list_tagged = fail_list_tagged
 
     def member_exists(self, email):
         self.calls.append(("exists", email))
@@ -499,6 +611,9 @@ class FakeMailchimpClient:
 
     def list_tagged_members(self, tag_name):
         self.calls.append(("list_tagged", tag_name))
+        if self.fail_list_tagged:
+            raise RuntimeError("Mailchimp list failed.")
+
         return self.paid_members
 
 
