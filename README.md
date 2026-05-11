@@ -91,7 +91,7 @@ Expected secret fields:
 
 The Mailchimp worker uses explicit HTTP timeouts so slow API calls fail instead
 of running until the Lambda hard timeout. The default timeouts are 2 seconds to
-connect and 5 seconds to read a response. Mailchimp transport failures and
+connect and 15 seconds to read a response. Mailchimp transport failures and
 `429 Too Many Requests` responses are retried in-process up to 3 times with
 exponential backoff before the SQS message is allowed to fail and retry.
 

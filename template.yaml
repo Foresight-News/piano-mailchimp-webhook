@@ -102,7 +102,7 @@ Resources:
       Environment:
         Variables:
           MAILCHIMP_CONNECT_TIMEOUT_SECONDS: 2
-          MAILCHIMP_READ_TIMEOUT_SECONDS: 5
+          MAILCHIMP_READ_TIMEOUT_SECONDS: 15
           MAILCHIMP_MAX_RETRIES: 3
           MAILCHIMP_RETRY_DELAY_SECONDS: 1
       Events:
