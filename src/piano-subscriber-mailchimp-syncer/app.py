@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import time
-from urllib.parse import quote, unquote_plus
+from urllib.parse import quote, unquote_plus, urlencode
 
 
 LOGGER = logging.getLogger()
@@ -14,7 +14,9 @@ LOGGER.setLevel(logging.INFO)
 
 DEFAULT_SECRET_ID = "piano-mailchimp-webhook/production"
 MAILCHIMP_TAG_NAME = "PAID"
+MAILCHIMP_EXPIRED_TAG_NAME = "EXPIRED"
 DEFAULT_BATCH_SIZE = 10
+DEFAULT_MAILCHIMP_PAGE_SIZE = 1000
 DEFAULT_MAILCHIMP_CONNECT_TIMEOUT_SECONDS = 2.0
 DEFAULT_MAILCHIMP_READ_TIMEOUT_SECONDS = 5.0
 DEFAULT_MAILCHIMP_MAX_RETRIES = 3
@@ -32,6 +34,8 @@ def lambda_handler(event, context):
     queued_batches = 0
     queued_rows = 0
     skipped_rows = 0
+    reconciliation_results = []
+    mailchimp_client = None
 
     for record in event.get("Records", []):
         bucket_name, key = _read_s3_location(record)
@@ -54,6 +58,15 @@ def lambda_handler(event, context):
             queued_batches += 1
             queued_rows += len(batch)
 
+        if mailchimp_client is None:
+            mailchimp_client = build_mailchimp_client()
+
+        reconciliation_result = reconcile_expired_paid_subscribers(
+            build_email_set(rows),
+            mailchimp_client,
+        )
+        reconciliation_results.append(reconciliation_result)
+
         LOGGER.info(
             "Queued s3://%s/%s for Mailchimp sync. queued_rows=%s skipped_rows=%s batch_size=%s",
             bucket_name,
@@ -67,6 +80,7 @@ def lambda_handler(event, context):
         "queued_batches": queued_batches,
         "queued_rows": queued_rows,
         "skipped_rows": skipped_rows,
+        "reconciliation": combine_reconciliation_results(reconciliation_results),
     }
 
 
@@ -76,6 +90,7 @@ def worker_handler(event, context):
     updated_rows = 0
     new_rows = 0
     skipped_rows = 0
+    failed_rows = 0
 
     for record in event.get("Records", []):
         message = json.loads(record["body"])
@@ -85,9 +100,10 @@ def worker_handler(event, context):
         updated_rows += result["updated_rows"]
         new_rows += result["new_rows"]
         skipped_rows += result["skipped_rows"]
+        failed_rows += result["failed_rows"]
 
         LOGGER.info(
-            "Synced Mailchimp batch. bucket=%s key=%s batch_number=%s processed_rows=%s updated_rows=%s new_rows=%s skipped_rows=%s",
+            "Synced Mailchimp batch. bucket=%s key=%s batch_number=%s processed_rows=%s updated_rows=%s new_rows=%s skipped_rows=%s failed_rows=%s",
             message.get("bucket"),
             message.get("key"),
             message.get("batch_number"),
@@ -95,14 +111,16 @@ def worker_handler(event, context):
             result["updated_rows"],
             result["new_rows"],
             result["skipped_rows"],
+            result["failed_rows"],
         )
 
     LOGGER.info(
-        "Mailchimp sync summary. processed_rows=%s updated_rows=%s new_rows=%s skipped_rows=%s",
+        "Mailchimp sync summary. processed_rows=%s updated_rows=%s new_rows=%s skipped_rows=%s failed_rows=%s",
         processed_rows,
         updated_rows,
         new_rows,
         skipped_rows,
+        failed_rows,
     )
 
     return {
@@ -110,6 +128,7 @@ def worker_handler(event, context):
         "updated_rows": updated_rows,
         "new_rows": new_rows,
         "skipped_rows": skipped_rows,
+        "failed_rows": failed_rows,
     }
 
 
@@ -191,6 +210,7 @@ def sync_subscriber_rows(rows, mailchimp_client, start_row_number=1):
     updated_rows = 0
     new_rows = 0
     skipped_rows = 0
+    failed_rows = 0
 
     for row_number, row in enumerate(rows, start=start_row_number):
         email = _get_row_text(row, "email")
@@ -202,24 +222,29 @@ def sync_subscriber_rows(rows, mailchimp_client, start_row_number=1):
         first_name = _get_row_text(row, "first_name")
         last_name = _get_row_text(row, "last_name")
 
-        is_existing_member = mailchimp_client.member_exists(email)
-        mailchimp_client.upsert_member(
-            email=email,
-            first_name=first_name,
-            last_name=last_name,
-        )
-        mailchimp_client.ensure_paid_tag(email)
-        processed_rows += 1
-        if is_existing_member:
-            updated_rows += 1
-        else:
-            new_rows += 1
+        try:
+            is_existing_member = mailchimp_client.member_exists(email)
+            mailchimp_client.upsert_member(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+            )
+            mailchimp_client.ensure_paid_tag(email)
+            processed_rows += 1
+            if is_existing_member:
+                updated_rows += 1
+            else:
+                new_rows += 1
+        except Exception:
+            failed_rows += 1
+            LOGGER.exception("Failed to sync CSV row %s to Mailchimp.", row_number)
 
     return {
         "processed_rows": processed_rows,
         "updated_rows": updated_rows,
         "new_rows": new_rows,
         "skipped_rows": skipped_rows,
+        "failed_rows": failed_rows,
     }
 
 
@@ -246,6 +271,70 @@ def build_subscriber_batches(csv_body):
     return rows, {
         "skipped_rows": skipped_rows,
     }
+
+
+def build_email_set(rows):
+    emails = set()
+    for row in rows:
+        email = normalize_email(_get_row_text(row, "email"))
+        if email:
+            emails.add(email)
+
+    return emails
+
+
+def reconcile_expired_paid_subscribers(active_emails, mailchimp_client):
+    result = {
+        "active_emails": len(active_emails),
+        "paid_members": 0,
+        "expired_members": 0,
+        "failed_members": 0,
+        "skipped_blank_members": 0,
+    }
+
+    for member in mailchimp_client.list_tagged_members(MAILCHIMP_TAG_NAME):
+        result["paid_members"] += 1
+        email = normalize_email(member.get("email_address"))
+        if not email:
+            result["skipped_blank_members"] += 1
+            continue
+
+        if email in active_emails:
+            continue
+
+        try:
+            mailchimp_client.ensure_expired_tag(email)
+            result["expired_members"] += 1
+        except Exception:
+            result["failed_members"] += 1
+            LOGGER.exception("Failed to add EXPIRED tag for Mailchimp member.")
+
+    LOGGER.info(
+        "Mailchimp paid subscriber reconciliation summary. active_emails=%s paid_members=%s expired_members=%s failed_members=%s skipped_blank_members=%s",
+        result["active_emails"],
+        result["paid_members"],
+        result["expired_members"],
+        result["failed_members"],
+        result["skipped_blank_members"],
+    )
+
+    return result
+
+
+def combine_reconciliation_results(results):
+    combined = {
+        "active_emails": 0,
+        "paid_members": 0,
+        "expired_members": 0,
+        "failed_members": 0,
+        "skipped_blank_members": 0,
+    }
+
+    for result in results:
+        for key in combined:
+            combined[key] += result.get(key, 0)
+
+    return combined
 
 
 def chunk_rows(rows, batch_size):
@@ -302,11 +391,17 @@ class MailchimpClient:
         return response.status != 404
 
     def ensure_paid_tag(self, email):
+        self.ensure_tag(email, MAILCHIMP_TAG_NAME)
+
+    def ensure_expired_tag(self, email):
+        self.ensure_tag(email, MAILCHIMP_EXPIRED_TAG_NAME)
+
+    def ensure_tag(self, email, tag_name):
         subscriber_hash = build_subscriber_hash(email)
         body = {
             "tags": [
                 {
-                    "name": MAILCHIMP_TAG_NAME,
+                    "name": tag_name,
                     "status": "active",
                 }
             ]
@@ -314,9 +409,65 @@ class MailchimpClient:
         url = f"{self._member_url(subscriber_hash)}/tags"
         self._request_json("POST", url, body)
 
+    def list_tagged_members(self, tag_name):
+        tag_id = self.find_tag_id(tag_name)
+        if tag_id is None:
+            LOGGER.info("Mailchimp tag was not found. tag_name=%s", tag_name)
+            return []
+
+        members = []
+        list_id = quote(self.audience_id, safe="")
+        segment_id = quote(str(tag_id), safe="")
+
+        for offset in range(0, 1_000_000_000, DEFAULT_MAILCHIMP_PAGE_SIZE):
+            query = urlencode(
+                {
+                    "count": DEFAULT_MAILCHIMP_PAGE_SIZE,
+                    "offset": offset,
+                }
+            )
+            payload = self._get_json(
+                f"{self.base_url}/lists/{list_id}/segments/{segment_id}/members?{query}"
+            )
+            page_members = payload.get("members", [])
+            if not isinstance(page_members, list):
+                break
+
+            members.extend(
+                member for member in page_members if isinstance(member, dict)
+            )
+
+            total_items = int(payload.get("total_items") or 0)
+            if offset + len(page_members) >= total_items or not page_members:
+                break
+
+        return members
+
+    def find_tag_id(self, tag_name):
+        list_id = quote(self.audience_id, safe="")
+        query = urlencode({"name": tag_name})
+        payload = self._get_json(f"{self.base_url}/lists/{list_id}/tag-search?{query}")
+        tags = payload.get("tags", [])
+        if not isinstance(tags, list):
+            return None
+
+        normalized_tag_name = tag_name.strip().lower()
+        for tag in tags:
+            if not isinstance(tag, dict):
+                continue
+
+            if str(tag.get("name", "")).strip().lower() == normalized_tag_name:
+                return tag.get("id")
+
+        return None
+
     def _member_url(self, subscriber_hash):
         list_id = quote(self.audience_id, safe="")
         return f"{self.base_url}/lists/{list_id}/members/{subscriber_hash}"
+
+    def _get_json(self, url):
+        response = self._request_json("GET", url)
+        return json.loads(response.data.decode("utf-8"))
 
     def _request_json(self, method, url, body=None, allow_statuses=None):
         encoded_body = None if body is None else json.dumps(body).encode("utf-8")
@@ -354,11 +505,18 @@ class MailchimpClient:
 
 
 def build_subscriber_hash(email):
-    normalized_email = email.strip().lower()
+    normalized_email = normalize_email(email)
     if not normalized_email:
         raise ValueError("Email address is required.")
 
     return hashlib.md5(normalized_email.encode("utf-8")).hexdigest()
+
+
+def normalize_email(email):
+    if email is None:
+        return ""
+
+    return str(email).strip().lower()
 
 
 def _read_s3_location(record):

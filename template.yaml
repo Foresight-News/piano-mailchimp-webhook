@@ -90,6 +90,8 @@ Resources:
               Resource: !Sub arn:${AWS::Partition}:s3:::*/piano/subscribers/*.csv
         - SQSSendMessagePolicy:
             QueueName: !GetAtt SubscriberMailchimpSyncQueue.QueueName
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${SecretRegion}:${AWS::AccountId}:secret:${SecretId}*
 
   PianoSubscriberMailchimpSyncWorkerFunction:
     Type: AWS::Serverless::Function
