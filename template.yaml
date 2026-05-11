@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Export Piano subscribers to CSV in S3.
+
+Parameters:
+  PianoApiToken:
+    Type: String
+    NoEcho: true
+    Description: Piano publisher API token used by the subscriber export Lambda.
+  PianoAid:
+    Type: String
+    Default: 28C3eb1vpu
+    Description: Piano application ID.
+  PianoSource:
+    Type: String
+    Default: VX
+    Description: Piano publisher user search source.
+  PageLimit:
+    Type: Number
+    Default: 1000
+    MinValue: 1
+    Description: Number of users to request from Piano per page.
+  MaxPages:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    Description: Safety limit for offset-based pagination.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures:
+      - arm64
+    Timeout: 300
+    MemorySize: 256
+    Environment:
+      Variables:
+        S3_BUCKET: !Ref SubscriberExportBucket
+        PIANO_API_TOKEN: !Ref PianoApiToken
+        PIANO_AID: !Ref PianoAid
+        PIANO_SOURCE: !Ref PianoSource
+        PAGE_LIMIT: !Ref PageLimit
+        MAX_PAGES: !Ref MaxPages
+
+Resources:
+  SubscriberExportBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: fn-lambda
+
+  PianoSubscriberExportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/piano-subscriber-exporter/
+      Handler: app.lambda_handler
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref SubscriberExportBucket
+
+Outputs:
+  SubscriberExportBucketName:
+    Description: Bucket where subscriber CSV exports are written.
+    Value: !Ref SubscriberExportBucket
+  PianoSubscriberExportFunctionName:
+    Description: Piano subscriber export Lambda function name.
+    Value: !Ref PianoSubscriberExportFunction

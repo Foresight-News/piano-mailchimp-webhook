@@ -8,3 +8,6 @@ Properties/PublishProfiles/
 publish/
 
 .aws-sam/
+
+__pycache__/
+*.pyc
