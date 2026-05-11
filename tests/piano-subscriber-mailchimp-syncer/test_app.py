@@ -1,5 +1,7 @@
 import json
+import os
 import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -39,6 +41,150 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
             client.calls,
         )
 
+    def test_build_subscriber_batches_returns_valid_rows_and_skips_missing_email(self):
+        rows, result = app.build_subscriber_batches(
+            "\ufeffindex,first_name,last_name,email\n"
+            "1,Ada,Lovelace,ada@example.com\n"
+            "2,No,Email,\n"
+            "3,Grace,Hopper, grace@example.com \n"
+        )
+
+        self.assertEqual({"skipped_rows": 1}, result)
+        self.assertEqual(
+            [
+                {
+                    "email": "ada@example.com",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                },
+                {
+                    "email": "grace@example.com",
+                    "first_name": "Grace",
+                    "last_name": "Hopper",
+                },
+            ],
+            rows,
+        )
+
+    def test_chunk_rows_splits_into_fixed_size_batches(self):
+        rows = [{"email": f"user-{index}@example.com"} for index in range(5)]
+
+        batches = list(app.chunk_rows(rows, 2))
+
+        self.assertEqual([2, 2, 1], [len(batch) for batch in batches])
+
+    def test_worker_handler_syncs_sqs_message_batches(self):
+        client = FakeMailchimpClient()
+        original_build_mailchimp_client = app.build_mailchimp_client
+        app.build_mailchimp_client = lambda: client
+        try:
+            result = app.worker_handler(
+                {
+                    "Records": [
+                        {
+                            "body": json.dumps(
+                                {
+                                    "bucket": "bucket-name",
+                                    "key": "piano/subscribers/subscribers.csv",
+                                    "batch_number": 1,
+                                    "rows": [
+                                        {
+                                            "email": "ada@example.com",
+                                            "first_name": "Ada",
+                                            "last_name": "Lovelace",
+                                        },
+                                        {
+                                            "email": "grace@example.com",
+                                            "first_name": "Grace",
+                                            "last_name": "Hopper",
+                                        },
+                                    ],
+                                }
+                            )
+                        }
+                    ]
+                },
+                None,
+            )
+        finally:
+            app.build_mailchimp_client = original_build_mailchimp_client
+
+        self.assertEqual({"processed_rows": 2, "skipped_rows": 0}, result)
+        self.assertEqual(
+            [
+                ("upsert", "ada@example.com", "Ada", "Lovelace"),
+                ("tag", "ada@example.com"),
+                ("upsert", "grace@example.com", "Grace", "Hopper"),
+                ("tag", "grace@example.com"),
+            ],
+            client.calls,
+        )
+
+    def test_lambda_handler_queues_csv_batches_from_s3_event(self):
+        s3 = FakeS3(
+            "\ufeffindex,first_name,last_name,email\n"
+            "1,Ada,Lovelace,ada@example.com\n"
+            "2,Grace,Hopper,grace@example.com\n"
+            "3,Katherine,Johnson,katherine@example.com\n"
+        )
+        sqs = FakeSqs()
+        original_boto3 = sys.modules.get("boto3")
+        sys.modules["boto3"] = types.SimpleNamespace(
+            client=lambda name, **_: {"s3": s3, "sqs": sqs}[name]
+        )
+        original_queue_url = os.environ.get("SYNC_QUEUE_URL")
+        original_batch_size = os.environ.get("SYNC_BATCH_SIZE")
+        os.environ["SYNC_QUEUE_URL"] = "https://sqs.example.test/queue"
+        os.environ["SYNC_BATCH_SIZE"] = "2"
+
+        try:
+            result = app.lambda_handler(
+                {
+                    "Records": [
+                        {
+                            "s3": {
+                                "bucket": {"name": "bucket-name"},
+                                "object": {
+                                    "key": "piano/subscribers/subscribers.csv",
+                                },
+                            }
+                        }
+                    ]
+                },
+                None,
+            )
+        finally:
+            if original_boto3 is None:
+                del sys.modules["boto3"]
+            else:
+                sys.modules["boto3"] = original_boto3
+
+            if original_queue_url is None:
+                os.environ.pop("SYNC_QUEUE_URL", None)
+            else:
+                os.environ["SYNC_QUEUE_URL"] = original_queue_url
+
+            if original_batch_size is None:
+                os.environ.pop("SYNC_BATCH_SIZE", None)
+            else:
+                os.environ["SYNC_BATCH_SIZE"] = original_batch_size
+
+        self.assertEqual(
+            {"queued_batches": 2, "queued_rows": 3, "skipped_rows": 0},
+            result,
+        )
+        self.assertEqual(
+            [
+                "https://sqs.example.test/queue",
+                "https://sqs.example.test/queue",
+            ],
+            [message["QueueUrl"] for message in sqs.messages],
+        )
+        self.assertEqual(
+            [2, 1],
+            [len(json.loads(message["MessageBody"])["rows"]) for message in sqs.messages],
+        )
+
     def test_mailchimp_client_uses_upsert_endpoint_without_status_update(self):
         http = FakeHttp()
         client = app.MailchimpClient(
@@ -46,6 +192,7 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
             api_key="api-key",
             server_prefix="us1",
             audience_id="audience-id",
+            request_timeout="timeout",
         )
 
         client.upsert_member("Ada@Example.COM", "Ada", "Lovelace")
@@ -62,6 +209,7 @@ class PianoSubscriberMailchimpSyncerTests(unittest.TestCase):
         self.assertEqual("subscribed", body["status_if_new"])
         self.assertNotIn("status", body)
         self.assertEqual({"FNAME": "Ada", "LNAME": "Lovelace"}, body["merge_fields"])
+        self.assertEqual("timeout", request["timeout"])
 
     def test_mailchimp_client_adds_paid_tag_without_removing_existing_tags(self):
         http = FakeHttp()
@@ -100,16 +248,48 @@ class FakeHttp:
     def __init__(self):
         self.requests = []
 
-    def request(self, method, url, body, headers):
+    def request(self, method, url, body, headers, timeout=None):
         self.requests.append(
             {
                 "method": method,
                 "url": url,
                 "body": body,
                 "headers": headers,
+                "timeout": timeout,
             }
         )
         return FakeResponse(200)
+
+
+class FakeS3:
+    def __init__(self, body):
+        self.body = body
+
+    def get_object(self, Bucket, Key):
+        return {
+            "Body": FakeBody(self.body.encode("utf-8")),
+        }
+
+
+class FakeBody:
+    def __init__(self, body):
+        self.body = body
+
+    def read(self):
+        return self.body
+
+
+class FakeSqs:
+    def __init__(self):
+        self.messages = []
+
+    def send_message(self, QueueUrl, MessageBody):
+        self.messages.append(
+            {
+                "QueueUrl": QueueUrl,
+                "MessageBody": MessageBody,
+            }
+        )
 
 
 class FakeResponse:

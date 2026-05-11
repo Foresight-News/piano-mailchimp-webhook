@@ -28,6 +28,17 @@ Resources:
   SubscriberExportBucket:
     Type: AWS::S3::Bucket
 
+  SubscriberMailchimpSyncDeadLetterQueue:
+    Type: AWS::SQS::Queue
+
+  SubscriberMailchimpSyncQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 1800
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SubscriberMailchimpSyncDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
   PianoSubscriberExportFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -54,6 +65,10 @@ Resources:
     Properties:
       CodeUri: src/piano-subscriber-mailchimp-syncer/
       Handler: app.lambda_handler
+      Environment:
+        Variables:
+          SYNC_QUEUE_URL: !Ref SubscriberMailchimpSyncQueue
+          SYNC_BATCH_SIZE: 10
       Events:
         SubscriberCsvCreated:
           Type: S3
@@ -73,6 +88,27 @@ Resources:
               Action:
                 - s3:GetObject
               Resource: !Sub arn:${AWS::Partition}:s3:::*/piano/subscribers/*.csv
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt SubscriberMailchimpSyncQueue.QueueName
+
+  PianoSubscriberMailchimpSyncWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/piano-subscriber-mailchimp-syncer/
+      Handler: app.worker_handler
+      Environment:
+        Variables:
+          MAILCHIMP_CONNECT_TIMEOUT_SECONDS: 2
+          MAILCHIMP_READ_TIMEOUT_SECONDS: 5
+      Events:
+        SubscriberSyncBatchQueued:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt SubscriberMailchimpSyncQueue.Arn
+            BatchSize: 1
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt SubscriberMailchimpSyncQueue.QueueName
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${SecretRegion}:${AWS::AccountId}:secret:${SecretId}*
 
@@ -84,5 +120,11 @@ Outputs:
     Description: Piano subscriber export Lambda function name.
     Value: !Ref PianoSubscriberExportFunction
   PianoSubscriberMailchimpSyncFunctionName:
-    Description: Piano subscriber CSV to Mailchimp sync Lambda function name.
+    Description: Piano subscriber CSV batch dispatcher Lambda function name.
     Value: !Ref PianoSubscriberMailchimpSyncFunction
+  PianoSubscriberMailchimpSyncWorkerFunctionName:
+    Description: Piano subscriber batch to Mailchimp sync worker Lambda function name.
+    Value: !Ref PianoSubscriberMailchimpSyncWorkerFunction
+  SubscriberMailchimpSyncQueueUrl:
+    Description: Queue where subscriber sync batches are written.
+    Value: !Ref SubscriberMailchimpSyncQueue

@@ -54,11 +54,13 @@ current Piano subscribers to CSV in S3 and sync those CSV rows to Mailchimp.
 - Output key pattern: `piano/subscribers/subscribers-YYYYMMDD-HHMMSS.csv`
 - Export schedule: every night at 1am GMT (`cron(0 1 * * ? *)`)
 - Sync trigger: S3 `ObjectCreated` for `piano/subscribers/*.csv`
+- Sync batching: the S3-triggered function splits CSV rows into SQS messages of
+  10 subscribers, and a worker Lambda syncs one queued batch at a time.
 
 The functions read Piano, Mailchimp, and export settings from AWS Secrets
 Manager secret `piano-mailchimp-webhook/production`. The template grants the
-Lambdas read access to that secret and does not expose API credentials as
-CloudFormation parameters.
+Lambdas read access to that secret where needed and does not expose API
+credentials as CloudFormation parameters.
 
 Expected secret fields:
 
@@ -83,6 +85,10 @@ Expected secret fields:
 
 `PianoSubscriberExport` is optional. `PageLimit` defaults to `1000`, and
 `MaxPages` defaults to `100`.
+
+The Mailchimp worker uses explicit HTTP timeouts so slow API calls fail and
+retry through SQS instead of running until the Lambda hard timeout. The default
+timeouts are 2 seconds to connect and 5 seconds to read a response.
 
 Example deploy:
 
