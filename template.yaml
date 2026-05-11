@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Export Piano subscribers to CSV in S3.
+Description: Export Piano subscribers to CSV in S3 and sync them to Mailchimp.
 
 Parameters:
   SecretId:
@@ -21,7 +21,6 @@ Globals:
     MemorySize: 256
     Environment:
       Variables:
-        S3_BUCKET: !Ref SubscriberExportBucket
         SECRET_ID: !Ref SecretId
         SECRET_REGION: !Ref SecretRegion
 
@@ -34,6 +33,9 @@ Resources:
     Properties:
       CodeUri: src/piano-subscriber-exporter/
       Handler: app.lambda_handler
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref SubscriberExportBucket
       Events:
         NightlySubscriberExport:
           Type: Schedule
@@ -47,6 +49,33 @@ Resources:
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${SecretRegion}:${AWS::AccountId}:secret:${SecretId}*
 
+  PianoSubscriberMailchimpSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/piano-subscriber-mailchimp-syncer/
+      Handler: app.lambda_handler
+      Events:
+        SubscriberCsvCreated:
+          Type: S3
+          Properties:
+            Bucket: !Ref SubscriberExportBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: piano/subscribers/
+                  - Name: suffix
+                    Value: .csv
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub arn:${AWS::Partition}:s3:::*/piano/subscribers/*.csv
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub arn:${AWS::Partition}:secretsmanager:${SecretRegion}:${AWS::AccountId}:secret:${SecretId}*
+
 Outputs:
   SubscriberExportBucketName:
     Description: Bucket where subscriber CSV exports are written.
@@ -54,3 +83,6 @@ Outputs:
   PianoSubscriberExportFunctionName:
     Description: Piano subscriber export Lambda function name.
     Value: !Ref PianoSubscriberExportFunction
+  PianoSubscriberMailchimpSyncFunctionName:
+    Description: Piano subscriber CSV to Mailchimp sync Lambda function name.
+    Value: !Ref PianoSubscriberMailchimpSyncFunction

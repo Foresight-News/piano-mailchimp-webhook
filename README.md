@@ -44,19 +44,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the webhook processing flow.
 
 ## Piano Subscriber Export SAM App
 
-This repo also contains a SAM app with one Python 3.12 Lambda function that
-exports current Piano subscribers to CSV in S3.
+This repo also contains a SAM app with Python 3.12 Lambda functions that export
+current Piano subscribers to CSV in S3 and sync those CSV rows to Mailchimp.
 
 - Template: `template.yaml`
-- Function code: `src/piano-subscriber-exporter/app.py`
+- Export function code: `src/piano-subscriber-exporter/app.py`
+- Mailchimp sync function code: `src/piano-subscriber-mailchimp-syncer/app.py`
 - Bucket created by CloudFormation: see stack output `SubscriberExportBucketName`
 - Output key pattern: `piano/subscribers/subscribers-YYYYMMDD-HHMMSS.csv`
-- Schedule: every night at 1am GMT (`cron(0 1 * * ? *)`)
+- Export schedule: every night at 1am GMT (`cron(0 1 * * ? *)`)
+- Sync trigger: S3 `ObjectCreated` for `piano/subscribers/*.csv`
 
-The function reads Piano credentials and export settings from AWS Secrets
+The functions read Piano, Mailchimp, and export settings from AWS Secrets
 Manager secret `piano-mailchimp-webhook/production`. The template grants the
-Lambda read access to that secret and does not expose the Piano API token as a
-CloudFormation parameter.
+Lambdas read access to that secret and does not expose API credentials as
+CloudFormation parameters.
 
 Expected secret fields:
 
@@ -65,6 +67,11 @@ Expected secret fields:
   "Piano": {
     "ApiToken": "",
     "ApplicationId": "28C3eb1vpu"
+  },
+  "Mailchimp": {
+    "ApiKey": "",
+    "ServerPrefix": "",
+    "AudienceId": ""
   },
   "PianoSubscriberExport": {
     "Source": "VX",
