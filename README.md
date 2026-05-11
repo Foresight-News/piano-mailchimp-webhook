@@ -51,6 +51,7 @@ exports current Piano subscribers to CSV in S3.
 - Function code: `src/piano-subscriber-exporter/app.py`
 - Bucket created by CloudFormation: see stack output `SubscriberExportBucketName`
 - Output key pattern: `piano/subscribers/subscribers-YYYYMMDD-HHMMSS.csv`
+- Schedule: every night at 1am GMT (`cron(0 1 * * ? *)`)
 
 The function reads Piano credentials and export settings from AWS Secrets
 Manager secret `piano-mailchimp-webhook/production`. The template grants the

@@ -34,6 +34,13 @@ Resources:
     Properties:
       CodeUri: src/piano-subscriber-exporter/
       Handler: app.lambda_handler
+      Events:
+        NightlySubscriberExport:
+          Type: Schedule
+          Properties:
+            Description: Run the Piano subscriber export every night at 1am GMT.
+            Schedule: cron(0 1 * * ? *)
+            Enabled: true
       Policies:
         - S3WritePolicy:
             BucketName: !Ref SubscriberExportBucket
