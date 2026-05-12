@@ -25,9 +25,10 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         PianoUserProfile? pianoUser,
         IReadOnlyList<NewsletterFieldMapping>? fieldMappings = null,
         string? pianoResponseBody = null,
-        string? pianoAccessResponseBody = null,
+        string? pianoActiveUserSearchResponseBody = null,
         HttpStatusCode mailchimpStatusCode = HttpStatusCode.OK,
-        string mailchimpResponseBody = "{}")
+        string mailchimpResponseBody = "{}",
+        string mailchimpMemberTagsResponseBody = "{\"tags\":[{\"name\":\"PAID\"}]}")
     {
         _loggerFactory = LoggerFactory.Create(builder =>
         {
@@ -37,25 +38,14 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
 
         var pianoHandler = new RecordingHttpMessageHandler((request, _) =>
         {
-            if (request.RequestUri?.AbsolutePath.EndsWith("/publisher/user/access/list", StringComparison.Ordinal) == true)
+            if (request.RequestUri?.AbsolutePath.EndsWith("/publisher/user/search", StringComparison.Ordinal) == true)
             {
-                var accessResponseBody = pianoAccessResponseBody ??
-                    """
-                    {
-                      "accesses": [
-                        {
-                          "resource_id": "paid-resource",
-                          "granted": "true",
-                          "start_date": "2020-01-01T00:00:00Z",
-                          "expiry_date": "2099-12-31T23:59:59Z"
-                        }
-                      ]
-                    }
-                    """;
+                var activeUserSearchResponseBody = pianoActiveUserSearchResponseBody ??
+                    BuildDefaultActiveUserSearchResponse(pianoUser, pianoResponseBody);
 
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent(accessResponseBody, Encoding.UTF8, "application/json")
+                    Content = new StringContent(activeUserSearchResponseBody, Encoding.UTF8, "application/json")
                 });
             }
 
@@ -71,11 +61,22 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
             });
         });
 
-        var mailchimpHandler = new RecordingHttpMessageHandler((_, _) =>
-            Task.FromResult(new HttpResponseMessage(mailchimpStatusCode)
+        var mailchimpHandler = new RecordingHttpMessageHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Get &&
+                request.RequestUri?.AbsolutePath.EndsWith("/tags", StringComparison.Ordinal) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(mailchimpMemberTagsResponseBody, Encoding.UTF8, "application/json")
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(mailchimpStatusCode)
             {
                 Content = new StringContent(mailchimpResponseBody, Encoding.UTF8, "application/json")
-            }));
+            });
+        });
 
         PianoRequests = pianoHandler.Requests;
         MailchimpRequests = mailchimpHandler.Requests;
@@ -206,6 +207,55 @@ internal sealed class WebhookFlowHarness : IAsyncDisposable
         _loggerFactory.Dispose();
 
         return ValueTask.CompletedTask;
+    }
+
+    private static string BuildDefaultActiveUserSearchResponse(PianoUserProfile? pianoUser, string? pianoResponseBody)
+    {
+        var uid = pianoUser?.Uid;
+        var email = pianoUser?.Email;
+
+        if (string.IsNullOrWhiteSpace(email) && !string.IsNullOrWhiteSpace(pianoResponseBody))
+        {
+            using var document = JsonDocument.Parse(pianoResponseBody);
+            var userElement = document.RootElement;
+
+            if (userElement.ValueKind == JsonValueKind.Object &&
+                userElement.TryGetProperty("user", out var nestedUser))
+            {
+                userElement = nestedUser;
+            }
+
+            if (userElement.ValueKind == JsonValueKind.Object)
+            {
+                uid = ReadStringProperty(userElement, "uid") ?? uid;
+                email = ReadStringProperty(userElement, "email");
+            }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            users = new[]
+            {
+                new
+                {
+                    uid,
+                    email
+                }
+            }
+        }, JsonOptions);
+    }
+
+    private static string? ReadStringProperty(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.GetRawText();
     }
 }
 

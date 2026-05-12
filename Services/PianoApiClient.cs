@@ -68,19 +68,20 @@ public sealed class PianoApiClient(
         throw new JsonException("Piano user response could not be deserialized.");
     }
 
-    public async Task<bool> HasActiveAccessToAnyResourceAsync(
-        string uid,
+    public async Task<bool> HasActiveAccessByEmailAsync(
+        string emailAddress,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(uid))
+        if (string.IsNullOrWhiteSpace(emailAddress))
         {
-            throw new ArgumentException("UID is required.", nameof(uid));
+            throw new ArgumentException("Email address is required.", nameof(emailAddress));
         }
 
+        var normalizedEmailAddress = emailAddress.Trim();
         var pianoOptions = options.Value;
         ConfigureClient(pianoOptions);
 
-        var requestUri = BuildAccessListRequestUri(uid, pianoOptions);
+        var requestUri = BuildActiveUserSearchRequestUri(normalizedEmailAddress, pianoOptions);
         using var response = await httpClient.GetAsync(requestUri, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -88,20 +89,20 @@ public sealed class PianoApiClient(
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
             logger.LogError(
-                "Piano access lookup failed for uid {Uid}. Status: {StatusCode}. RequestUri: {RequestUri}. Response: {ResponseBody}",
-                uid,
+                "Piano active user search failed for email {EmailAddress}. Status: {StatusCode}. RequestUri: {RequestUri}. Response: {ResponseBody}",
+                normalizedEmailAddress,
                 (int)response.StatusCode,
                 requestUri,
                 errorBody);
 
             throw new HttpRequestException(
-                $"Piano access lookup failed with status code {(int)response.StatusCode}.",
+                $"Piano active user search failed with status code {(int)response.StatusCode}.",
                 null,
                 response.StatusCode);
         }
 
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        return HasActiveAccessToAnyResource(responseBody);
+        return SearchResponseContainsEmail(responseBody, normalizedEmailAddress);
     }
 
     private void ConfigureClient(PianoOptions pianoOptions)
@@ -137,16 +138,21 @@ public sealed class PianoApiClient(
         return $"api/v3/publisher/user/get{query}";
     }
 
-    private static string BuildAccessListRequestUri(string uid, PianoOptions pianoOptions)
+    private static string BuildActiveUserSearchRequestUri(string emailAddress, PianoOptions pianoOptions)
     {
         var query = QueryString.Create(new Dictionary<string, string?>
         {
+            ["source"] = pianoOptions.SearchSource,
+            ["limit"] = "10",
+            ["offset"] = "0",
+            ["order_direction"] = "asc",
+            ["has_access"] = "true",
             ["aid"] = pianoOptions.ApplicationId,
             ["api_token"] = pianoOptions.ApiToken,
-            ["uid"] = uid
+            ["email"] = emailAddress
         });
 
-        return $"api/v3/publisher/user/access/list{query}";
+        return $"api/v3/publisher/user/search{query}";
     }
 
     private static PianoUserProfile? DeserializeUserProfile(string responseBody)
@@ -291,18 +297,16 @@ public sealed class PianoApiClient(
         };
     }
 
-    private static bool HasActiveAccessToAnyResource(string responseBody)
+    private static bool SearchResponseContainsEmail(string responseBody, string emailAddress)
     {
         using var document = JsonDocument.Parse(responseBody);
-        var today = DateTimeOffset.UtcNow.Date;
 
-        return EnumerateAccessRecords(document.RootElement)
-            .Any(access =>
-                IsGranted(access) &&
-                IsTodayWithinAccessDates(access, today));
+        return ExtractUsers(document.RootElement)
+            .Select(user => GetStringProperty(user, "email")?.Trim())
+            .Any(email => string.Equals(email, emailAddress, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static IEnumerable<JsonElement> EnumerateAccessRecords(JsonElement root)
+    private static IEnumerable<JsonElement> ExtractUsers(JsonElement root)
     {
         if (root.ValueKind == JsonValueKind.Array)
         {
@@ -314,65 +318,21 @@ public sealed class PianoApiClient(
             return [];
         }
 
-        foreach (var propertyName in new[] { "accesses", "access", "data", "items", "AccessDTO" })
+        foreach (var propertyName in new[] { "users", "data", "items", "results" })
         {
-            if (root.TryGetProperty(propertyName, out var records) &&
-                records.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty(propertyName, out var users) &&
+                users.ValueKind == JsonValueKind.Array)
             {
-                return records.EnumerateArray();
+                return users.EnumerateArray();
             }
         }
 
+        if (root.TryGetProperty("result", out var nested) &&
+            nested.ValueKind == JsonValueKind.Object)
+        {
+            return ExtractUsers(nested);
+        }
+
         return [];
-    }
-
-    private static bool IsGranted(JsonElement access)
-    {
-        if (!access.TryGetProperty("granted", out var granted))
-        {
-            return false;
-        }
-
-        return granted.ValueKind switch
-        {
-            JsonValueKind.String => string.Equals(granted.GetString(), "true", StringComparison.OrdinalIgnoreCase),
-            JsonValueKind.True => true,
-            _ => false
-        };
-    }
-
-    private static bool IsTodayWithinAccessDates(JsonElement access, DateTime today)
-    {
-        return TryGetDate(access, "start_date", out var startDate) &&
-               TryGetDate(access, "expiry_date", out var expiryDate) &&
-               startDate <= today &&
-               today <= expiryDate;
-    }
-
-    private static bool TryGetDate(JsonElement element, string propertyName, out DateTime date)
-    {
-        date = default;
-
-        if (!element.TryGetProperty(propertyName, out var property) ||
-            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            return false;
-        }
-
-        if (property.ValueKind == JsonValueKind.String &&
-            DateTimeOffset.TryParse(property.GetString(), out var parsedDate))
-        {
-            date = parsedDate.UtcDateTime.Date;
-            return true;
-        }
-
-        if (property.ValueKind == JsonValueKind.Number &&
-            property.TryGetInt64(out var unixTimeSeconds))
-        {
-            date = DateTimeOffset.FromUnixTimeSeconds(unixTimeSeconds).UtcDateTime.Date;
-            return true;
-        }
-
-        return false;
     }
 }

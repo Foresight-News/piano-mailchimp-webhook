@@ -32,6 +32,7 @@ Required sections:
     "BaseUrl": "https://api.piano.io",
     "ApiToken": "",
     "ApplicationId": "",
+    "SearchSource": "VX",
     "PrivateKey": ""
   },
   "NewsletterMapping": {

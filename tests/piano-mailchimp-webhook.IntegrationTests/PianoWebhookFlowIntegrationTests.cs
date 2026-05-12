@@ -45,6 +45,15 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.Contains("aid=test-application", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
         Assert.Contains("api_token=test-piano-token", pianoRequest.RequestUri.Query, StringComparison.Ordinal);
 
+        var activeUserSearchRequest = harness.PianoRequests[1];
+        Assert.Equal(HttpMethod.Get, activeUserSearchRequest.Method);
+        Assert.Equal("/api/v3/publisher/user/search", activeUserSearchRequest.RequestUri.AbsolutePath);
+        Assert.Contains("email=ada@example.com", activeUserSearchRequest.RequestUri.Query, StringComparison.Ordinal);
+        Assert.Contains("has_access=true", activeUserSearchRequest.RequestUri.Query, StringComparison.Ordinal);
+        Assert.Contains("source=VX", activeUserSearchRequest.RequestUri.Query, StringComparison.Ordinal);
+        Assert.Contains("aid=test-application", activeUserSearchRequest.RequestUri.Query, StringComparison.Ordinal);
+        Assert.Contains("api_token=test-piano-token", activeUserSearchRequest.RequestUri.Query, StringComparison.Ordinal);
+
         Assert.Equal(2, harness.MailchimpRequests.Count);
 
         var mailchimpUpsertRequest = harness.MailchimpRequests[0];
@@ -472,14 +481,12 @@ public sealed class PianoWebhookFlowIntegrationTests
     [Fact]
     public async Task PaidTagIsAddedWhenAnyGrantedAccessIsActiveForToday()
     {
-        var pianoAccessResponseBody = """
+        var pianoActiveUserSearchResponseBody = """
             {
-              "accesses": [
+              "users": [
                 {
-                  "resource_id": "other-resource",
-                  "granted": "true",
-                  "start_date": "2020-01-01T00:00:00Z",
-                  "expiry_date": "2099-12-31T23:59:59Z"
+                  "uid": "user-123",
+                  "email": "ada@example.com"
                 }
               ]
             }
@@ -493,7 +500,7 @@ public sealed class PianoWebhookFlowIntegrationTests
                 FirstName = "Ada",
                 LastName = "Lovelace"
             },
-            pianoAccessResponseBody: pianoAccessResponseBody);
+            pianoActiveUserSearchResponseBody: pianoActiveUserSearchResponseBody);
 
         var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
 
@@ -507,8 +514,8 @@ public sealed class PianoWebhookFlowIntegrationTests
     }
 
     [Theory]
-    [MemberData(nameof(InactivePaidAccessResponses))]
-    public async Task ExpiredTagIsAddedWhenNoGrantedAccessIsActiveForToday(string pianoAccessResponseBody)
+    [MemberData(nameof(InactivePaidAccessSearchResponses))]
+    public async Task ExpiredTagIsAddedWhenActiveUserSearchDoesNotContainEmail(string pianoActiveUserSearchResponseBody)
     {
         await using var harness = new WebhookFlowHarness(
             new PianoUserProfile
@@ -518,16 +525,22 @@ public sealed class PianoWebhookFlowIntegrationTests
                 FirstName = "Ada",
                 LastName = "Lovelace"
             },
-            pianoAccessResponseBody: pianoAccessResponseBody);
+            pianoActiveUserSearchResponseBody: pianoActiveUserSearchResponseBody);
 
         var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Equal(2, harness.PianoRequests.Count);
-        Assert.Equal(2, harness.MailchimpRequests.Count);
+        Assert.Equal(3, harness.MailchimpRequests.Count);
         Assert.Equal(HttpMethod.Put, harness.MailchimpRequests[0].Method);
 
-        var tagsRequest = harness.MailchimpRequests[1];
+        var existingTagsRequest = harness.MailchimpRequests[1];
+        Assert.Equal(HttpMethod.Get, existingTagsRequest.Method);
+        Assert.Equal(
+            $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
+            existingTagsRequest.RequestUri.AbsolutePath);
+
+        var tagsRequest = harness.MailchimpRequests[2];
         Assert.Equal(HttpMethod.Post, tagsRequest.Method);
         Assert.Equal(
             $"/3.0/lists/test-audience/members/{SubscriberHash.FromEmail("ada@example.com")}/tags",
@@ -538,6 +551,28 @@ public sealed class PianoWebhookFlowIntegrationTests
         Assert.Equal(1, tags.GetArrayLength());
         Assert.Equal("EXPIRED", tags[0].GetProperty("name").GetString());
         Assert.Equal("active", tags[0].GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task ExpiredTagIsNotAddedWhenMemberDoesNotAlreadyHavePaidTag()
+    {
+        await using var harness = new WebhookFlowHarness(
+            new PianoUserProfile
+            {
+                Uid = "user-123",
+                Email = "ada@example.com",
+                FirstName = "Ada",
+                LastName = "Lovelace"
+            },
+            pianoActiveUserSearchResponseBody: "{\"users\":[]}",
+            mailchimpMemberTagsResponseBody: "{\"tags\":[{\"name\":\"NEWSLETTER\"}]}");
+
+        var result = await harness.SendWebhookAsync(CreateWebhookEvent("user_created"));
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, harness.MailchimpRequests.Count);
+        Assert.Equal(HttpMethod.Put, harness.MailchimpRequests[0].Method);
+        Assert.Equal(HttpMethod.Get, harness.MailchimpRequests[1].Method);
     }
 
     [Fact]
@@ -625,18 +660,25 @@ public sealed class PianoWebhookFlowIntegrationTests
         };
     }
 
-    public static IEnumerable<object[]> InactivePaidAccessResponses()
+    public static IEnumerable<object[]> InactivePaidAccessSearchResponses()
     {
         yield return
         [
             """
             {
-              "accesses": [
+              "users": []
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "users": [
                 {
-                  "resource_id": "paid-resource",
-                  "granted": "false",
-                  "start_date": "2020-01-01T00:00:00Z",
-                  "expiry_date": "2099-12-31T23:59:59Z"
+                  "uid": "other-user",
+                  "email": "grace@example.com"
                 }
               ]
             }
@@ -647,12 +689,25 @@ public sealed class PianoWebhookFlowIntegrationTests
         [
             """
             {
-              "accesses": [
+              "result": {
+                "users": [
+                  {
+                    "uid": "other-user",
+                    "email": "grace@example.com"
+                  }
+                ]
+              }
+            }
+            """
+        ];
+
+        yield return
+        [
+            """
+            {
+              "items": [
                 {
-                  "resource_id": "paid-resource",
-                  "granted": "true",
-                  "start_date": "2020-01-01T00:00:00Z",
-                  "expiry_date": "2021-01-01T00:00:00Z"
+                  "uid": "user-123"
                 }
               ]
             }
@@ -663,30 +718,7 @@ public sealed class PianoWebhookFlowIntegrationTests
         [
             """
             {
-              "accesses": [
-                {
-                  "resource_id": "paid-resource",
-                  "granted": "true",
-                  "start_date": "2099-01-01T00:00:00Z",
-                  "expiry_date": "2099-12-31T23:59:59Z"
-                }
-              ]
-            }
-            """
-        ];
-
-        yield return
-        [
-            """
-            {
-              "accesses": [
-                {
-                  "resource_id": "paid-resource",
-                  "granted": "true",
-                  "start_date": null,
-                  "expiry_date": "2099-12-31T23:59:59Z"
-                }
-              ]
+              "data": null
             }
             """
         ];

@@ -27,10 +27,10 @@ sequenceDiagram
     Webhook->>Mailchimp: Upsert audience member
     Webhook->>Mailchimp: Set merge fields including PIANOID
     Webhook->>Mailchimp: Set newsletter interests
-    Webhook->>PianoApi: Check active access by uid
-    alt Active access exists
+    Webhook->>PianoApi: Search active users by email
+    alt Active search result matches email
         Webhook->>Mailchimp: Add PAID tag
-    else No active access
+    else No active search result and member already has PAID tag
         Webhook->>Mailchimp: Add EXPIRED tag
     end
     Webhook->>Store: Mark event processed

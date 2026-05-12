@@ -82,15 +82,15 @@ public sealed class PianoWebhookProcessor(
         };
 
         await mailchimpAudienceService.UpsertMemberAsync(request, cancellationToken);
-        var hasPaidAccess = await pianoApiClient.HasActiveAccessToAnyResourceAsync(
-            uid,
+        var hasPaidAccess = await pianoApiClient.HasActiveAccessByEmailAsync(
+            request.EmailAddress,
             cancellationToken);
 
         if (hasPaidAccess)
         {
             await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, ["PAID"], cancellationToken);
         }
-        else
+        else if (await mailchimpAudienceService.HasMemberTagAsync(request.EmailAddress, "PAID", cancellationToken))
         {
             await mailchimpAudienceService.AddMemberTagsAsync(request.EmailAddress, ["EXPIRED"], cancellationToken);
         }

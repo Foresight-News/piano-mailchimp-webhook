@@ -6,7 +6,7 @@ public interface IPianoApiClient
 {
     Task<PianoUserProfile?> GetUserAsync(string uid, CancellationToken cancellationToken = default);
 
-    Task<bool> HasActiveAccessToAnyResourceAsync(
-        string uid,
+    Task<bool> HasActiveAccessByEmailAsync(
+        string emailAddress,
         CancellationToken cancellationToken = default);
 }
